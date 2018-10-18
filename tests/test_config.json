@@ -1,0 +1,12 @@
+{
+    "local_registry" : "./",
+    "jobs": "./tests/test_jobs.json",
+    "workers" : [
+        {
+            "name": "local",
+            "hostname": "localhost",
+            "port": 6666,
+            "num_slots": 4
+        }
+    ]
+}

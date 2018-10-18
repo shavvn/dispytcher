@@ -1,0 +1,17 @@
+[
+    {
+        "name": "test_one",
+        "cmd": [
+            "ls",
+            "echo 'hello world!'"
+        ],
+        "num_slots": 1,
+        "tags":["testing"]
+    },
+    {
+        "name": "test_job_multicore",
+        "cmd": ["ls"],
+        "num_slots": 2,
+        "tags":["testing"]
+    }
+]
