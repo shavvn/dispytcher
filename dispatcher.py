@@ -36,6 +36,8 @@ class Dispatcher(object):
 
         if not worker:
             print('No worker specified, automatically choosing')
+
+        # sender
         self.client = Client()
 
         job_file = config['jobs']
@@ -43,27 +45,42 @@ class Dispatcher(object):
             jobs = json.load(fp)
 
         # figure out actual jobs to run
-        self.jobs = {}
+        self.jobs = self.get_jobs(jobs, job, tag)
+        self.workers = config['workers']
+        self.actiave_workers = []
+        self.job_mapping = {}
+
+    def get_jobs(jobs, job, tag):
+        """Filter out actual jobs to run
+
+        The config file should provide a full list of jobs, and the user
+        specify job/tag to select among them.
+
+        Arguments:
+            jobs {List} -- list of dicts
+
+        Returns:
+            {dict} -- list of jobs mapped by their name
+        """
+        actual_jobs = {}
         if job:
             for job_data in jobs:
                 if job_data['name'] == job:
-                    self.jobs[job_data['name']] = job_data
+                    actual_jobs.jobs[job_data['name']] = job_data
                     break
         elif tag:
             for job_data in jobs:
                 if tag in job_data['tags']:
-                    self.jobs[job_data['name']] = job_data
+                    actual_jobs[job_data['name']] = job_data
         else:
             for job_data in jobs:
-                self.jobs[job_data['name']] = job_data
+                actual_jobs[job_data['name']] = job_data
 
-        if not self.jobs:
+        if not actual_jobs:
             print('Did not find matching jobs!')
             exit(1)
 
-        self.workers = config['workers']
-        self.actiave_workers = []
-        self.job_mapping = {}
+        return actual_jobs
 
     def dispatch(self):
         """Dispatching jobs to workers
@@ -122,6 +139,7 @@ def load_config(config_file):
 
     if 'jobs' not in data:
         print('No jobs in config file!')
+        exit(1)
 
     jobs_file = data['jobs']
     if not os.path.exists(jobs_file):

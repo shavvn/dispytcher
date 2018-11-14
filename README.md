@@ -1,4 +1,4 @@
-# dispycher: Job dispatcher in Python
+# dispytcher: Job dispatcher in Python
 
 I got sick and tired of sshing into different servers and run simulations, and I
 don't want to go through all the trouble installing HPC softwares such as slurm.
