@@ -30,6 +30,8 @@ class Worker(object):
         host_ip = socket.gethostbyname(host_name)
         self.server = Server(host_ip, port)
         self._threads = []
+        self._thread_stops = []
+        self._pending_procs = {}
 
     def run(self):
         while True:
@@ -45,11 +47,14 @@ class Worker(object):
                 print('Unexpected error!')
                 print(e.message)
                 continue
-            thread = threading.Thread(target=self.execute, args=(data,))
+            stop_event = threading.Event()
+            thread = threading.Thread(
+                target=self.execute, args=(data, stop_event,))
+            self._thread_stops.append(stop_event)
             thread.start()
         return True
 
-    def execute(self, data):
+    def execute(self, data, stop_event):
         cmds = []
         for cmd_data in data['cmds']:
             cmd = [cmd_data['cmd']]
@@ -63,9 +68,21 @@ class Worker(object):
                 print(cmd)
         else:
             for cmd in cmds:
-                subprocess.run(cmd)
+                proc = subprocess.Popen(cmd)
+                self._pending_procs[proc.pid] = proc
+                proc.wait()
+                self._pending_procs.pop(proc.pid)
+                if stop_event.is_set():
+                    break
 
     def stop(self):
+        for event in self._thread_stops:
+            event.set()
+        for thread in self._threads:
+            thread.join()
+        for pid, proc in self._pending_procs.items():
+            if proc.returncode is not None:
+                proc.terminate()
         self.server.close()
 
 
