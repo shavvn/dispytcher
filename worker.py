@@ -10,6 +10,8 @@ So yeah, a worker is actually a server from jsonsocket...
 
 import argparse
 import socket
+import subprocess
+import threading
 from jsonsocket import Server
 
 
@@ -27,6 +29,7 @@ class Worker(object):
         """
         host_ip = socket.gethostbyname(host_name)
         self.server = Server(host_ip, port)
+        self._threads = []
 
     def run(self):
         while True:
@@ -42,8 +45,28 @@ class Worker(object):
                 print('Unexpected error!')
                 print(e.message)
                 continue
-            print(data)
+            thread = threading.Thread(target=self.execute, args=(data,))
+            thread.start()
         return True
+
+    def execute(self, data):
+        cmds = []
+        for cmd_data in data['cmds']:
+            cmd = [cmd_data['cmd']]
+            if cmd_data.get('args'):
+                cmd += cmd_data['args']
+            cmds.append(cmd)
+
+        print("Job:", data["name"])
+        if data['dry']:
+            for cmd in cmds:
+                print(cmd)
+        else:
+            for cmd in cmds:
+                subprocess.run(cmd)
+
+    def stop(self):
+        self.server.close()
 
 
 if __name__ == '__main__':
@@ -58,4 +81,9 @@ if __name__ == '__main__':
         exit(1)
     host_name = args.hostname
     worker = Worker(host_name, args.port)
-    worker.run()
+    try:
+        worker.run()
+    except KeyboardInterrupt:
+        print('terminating...')
+        worker.stop()
+        exit(0)

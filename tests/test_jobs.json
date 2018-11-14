@@ -1,17 +1,51 @@
 [
     {
         "name": "test_one",
-        "cmd": [
-            "ls",
-            "echo 'hello world!'"
+        "cmds": [
+            {
+                "cmd": "ls",
+                "args": []
+            },
+            {
+                "cmd": "echo",
+                "args": [
+                    "hello world!"
+                ]
+            }
         ],
         "num_slots": 1,
-        "tags":["testing"]
+        "tags": [
+            "testing"
+        ]
     },
     {
         "name": "test_job_multicore",
-        "cmd": ["ls"],
+        "cmds": [
+            {
+                "cmd": "ls",
+                "args": ["-lh"]
+            }
+        ],
         "num_slots": 2,
-        "tags":["testing"]
+        "tags": [
+            "testing"
+        ]
+    },
+    {
+        "name": "test_long",
+        "cmds": [
+            {
+                "cmd": "sleep",
+                "args": ["5"]
+            },
+            {
+                "cmd": "echo",
+                "args": ["wake up"]
+            }
+        ],
+        "num_slots": 1,
+        "tags": [
+            "testing"
+        ]
     }
 ]

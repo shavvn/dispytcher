@@ -21,13 +21,12 @@ import argparse
 import json
 import os
 
-from job import Job
 from jsonsocket import Client
 
 
 class Dispatcher(object):
 
-    def __init__(self, config, job=None, tag=None, worker=None):
+    def __init__(self, config, job=None, tag=None, worker=None, dry_run=False):
         if not (job or tag):
             print('No job or tag specified, running all jobs!')
         if job and tag:
@@ -37,6 +36,7 @@ class Dispatcher(object):
         if not worker:
             print('No worker specified, automatically choosing')
 
+        self.dry_run = dry_run
         # sender
         self.client = Client()
 
@@ -50,7 +50,7 @@ class Dispatcher(object):
         self.actiave_workers = []
         self.job_mapping = {}
 
-    def get_jobs(jobs, job, tag):
+    def get_jobs(self, jobs, job, tag):
         """Filter out actual jobs to run
 
         The config file should provide a full list of jobs, and the user
@@ -79,6 +79,9 @@ class Dispatcher(object):
         if not actual_jobs:
             print('Did not find matching jobs!')
             exit(1)
+
+        for job_name, job in actual_jobs.items():
+            job['dry'] = self.dry_run
 
         return actual_jobs
 
@@ -155,6 +158,7 @@ def init_argparser():
     parser.add_argument('-t', '--tag', type=str, help='specifc job tag')
     parser.add_argument('-w', '--worker', type=str,
                         help='specific worker name')
+    parser.add_argument('--dry', help='if its a dry run', action='store_true')
     return parser
 
 
@@ -163,7 +167,8 @@ if __name__ == '__main__':
     args = arg_parser.parse_args()
 
     config = load_config(args.config)
-    dispatcher = Dispatcher(config, args.job, args.tag, args.worker)
+    dispatcher = Dispatcher(config, args.job, args.tag,
+                            args.worker, dry_run=args.dry)
     dispatcher.dispatch()
     dispatcher.close()
     exit(0)
