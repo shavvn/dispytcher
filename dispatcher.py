@@ -26,7 +26,7 @@ from jsonsocket import Client
 
 class Dispatcher(object):
 
-    def __init__(self, config, job=None, tag=None, worker=None, dry_run=False):
+    def __init__(self, config, job=None, tag=None, worker=None, action=None):
         if not (job or tag):
             print('No job or tag specified, running all jobs!')
         if job and tag:
@@ -36,7 +36,6 @@ class Dispatcher(object):
         if not worker:
             print('No worker specified, automatically choosing')
 
-        self.dry_run = dry_run
         # sender
         self.client = Client()
 
@@ -45,12 +44,12 @@ class Dispatcher(object):
             jobs = json.load(fp)
 
         # figure out actual jobs to run
-        self.jobs = self.get_jobs(jobs, job, tag)
+        self.jobs = self.get_jobs(jobs, job, tag, action)
         self.workers = config['workers']
         self.actiave_workers = []
         self.job_mapping = {}
 
-    def get_jobs(self, jobs, job, tag):
+    def get_jobs(self, jobs, job, tag, action):
         """Filter out actual jobs to run
 
         The config file should provide a full list of jobs, and the user
@@ -81,7 +80,7 @@ class Dispatcher(object):
             exit(1)
 
         for job_name, job in actual_jobs.items():
-            job['dry'] = self.dry_run
+            job['action'] = action
 
         return actual_jobs
 
@@ -112,8 +111,9 @@ class Dispatcher(object):
             self._send(worker, self.jobs[job_name])
 
     def _send(self, worker, job):
-        print('Sending {} to {}'.format(job['name'], worker['name']))
         self.client.connect(worker['hostname'], worker['port'])
+        print('Sending {} to {}:{}'.format(
+            job['name'], worker['name'], worker['port']))
         self.client.send(job)
         self.client.close()
 
@@ -159,6 +159,10 @@ def init_argparser():
     parser.add_argument('-w', '--worker', type=str,
                         help='specific worker name')
     parser.add_argument('--dry', help='if its a dry run', action='store_true')
+    parser.add_argument('--stop',
+                        help='stop a job/jobs, only supports "all" option now',
+                        action='store_true')
+    parser.add_argument('--report', help='report job status(NOT implemented)')
     return parser
 
 
@@ -167,8 +171,14 @@ if __name__ == '__main__':
     args = arg_parser.parse_args()
 
     config = load_config(args.config)
+    action = 'run'
+    if args.dry:
+        action = 'dry'
+    elif args.stop:
+        action = 'stop'
+
     dispatcher = Dispatcher(config, args.job, args.tag,
-                            args.worker, dry_run=args.dry)
+                            args.worker, action=action)
     dispatcher.dispatch()
     dispatcher.close()
     exit(0)

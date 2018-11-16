@@ -47,11 +47,14 @@ class Worker(object):
                 print('Unexpected error!')
                 print(e.message)
                 continue
-            stop_event = threading.Event()
-            thread = threading.Thread(
-                target=self.execute, args=(data, stop_event,))
-            self._thread_stops.append(stop_event)
-            thread.start()
+            if data['action'] == 'stop':
+                self.stop()
+            else:
+                stop_event = threading.Event()
+                thread = threading.Thread(
+                    target=self.execute, args=(data, stop_event,))
+                self._thread_stops.append(stop_event)
+                thread.start()
         return True
 
     def execute(self, data, stop_event):
@@ -63,7 +66,7 @@ class Worker(object):
             cmds.append(cmd)
 
         print("Job:", data["name"])
-        if data['dry']:
+        if data['action'] == 'dry':
             for cmd in cmds:
                 print(cmd)
         else:
@@ -78,12 +81,13 @@ class Worker(object):
     def stop(self):
         for event in self._thread_stops:
             event.set()
+        self._thread_stops.clear()
         for thread in self._threads:
             thread.join()
+        self._threads.clear()
         for pid, proc in self._pending_procs.items():
             if proc.returncode is not None:
                 proc.terminate()
-        self.server.close()
 
 
 if __name__ == '__main__':
