@@ -66,6 +66,8 @@ class Worker(object):
                 self._threads[self._job_id] = thread
                 thread.start()
                 self._job_id += 1
+            elif action == 'report':
+                self.report()
             else:
                 continue
         return True
@@ -137,6 +139,14 @@ class Worker(object):
         self._thread_stops.clear()
         self._threads.clear()
 
+    def report(self):
+        stat = {"running_procs": len(self._pending_procs)}
+        try:
+            self.server.send(stat)
+        except (ValueError, OSError) as e:
+            print("cannot send report, continue operation")
+            print(e.message)
+        return
 
 if __name__ == '__main__':
     arg_parser = argparse.ArgumentParser(description='Initialize worker')

@@ -14,7 +14,6 @@ Things TODO:
 3. command line to json conversion
 4. should probably make use of regristry for lookup
     - should it be local or remote or both? (thinking remote now..)
-5. assuming all workers have clean state or dynimically track how many slots?
 """
 
 import argparse
@@ -90,6 +89,7 @@ class Dispatcher(object):
         Given the slots available and slots needed, send jobs to workers.
 
         TODO test which workers are actually online and how busy they are
+        TODO save jobs that are not sent out successfully for a resend later
         Raises:
             Exception -- if not enough worker slots raise this exception
         """
@@ -162,7 +162,8 @@ def init_argparser():
     parser.add_argument('--stop',
                         help='stop a job/jobs, only supports "all" option now',
                         action='store_true')
-    parser.add_argument('--report', help='report job status(NOT implemented)')
+    parser.add_argument('--report', help='report job status(NOT implemented)',
+                        action='store_true')
     return parser
 
 
@@ -176,6 +177,8 @@ if __name__ == '__main__':
         action = 'dry'
     elif args.stop:
         action = 'stop'
+    elif args.report:
+        action = 'report'
 
     dispatcher = Dispatcher(config, args.job, args.tag,
                             args.worker, action=action)
