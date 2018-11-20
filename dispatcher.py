@@ -26,8 +26,7 @@ from jsonsocket import Client
 
 class Dispatcher(object):
 
-    def __init__(self, config, job=None, tag=None, worker=None, group=None,
-                 action=None):
+    def __init__(self, config, job=None, tag=None, worker=None, group=None):
         """Create a one-time dispatcher sending jobs/actions out
 
         config contains all of job/worker info so that job/tag/worker/group
@@ -43,8 +42,6 @@ class Dispatcher(object):
             tag {str} -- tag associates with multiple jobs (default: {None})
             worker {str} -- worker name (default: {None})
             group {str} -- worker group that define multiple workers
-                           (default: {None})
-            action {str} -- action, can be run, dry, report or stop
                            (default: {None})
         """
 
@@ -64,11 +61,7 @@ class Dispatcher(object):
 
         # figure out actual jobs or workers
         self.workers = self.get_workers(config['workers'], worker, group)
-        self.jobs = self.get_jobs(config['jobs'], job, tag, action)
-        if action == 'run' or action == 'dry':
-            self.dispatch()
-        elif action == 'report':
-            self.report()
+        self.jobs = self.get_jobs(config['jobs'], job, tag)
 
     def get_workers(self, workers, worker, group):
         """Filter out actual workers to operate
@@ -96,7 +89,7 @@ class Dispatcher(object):
                 actual_workers[worker_info['name']] = worker_info
         return actual_workers
 
-    def get_jobs(self, jobs, job, tag, action):
+    def get_jobs(self, jobs, job, tag):
         """Filter out actual jobs to run
 
         The config file should provide a full list of jobs, and the user
@@ -106,7 +99,6 @@ class Dispatcher(object):
             jobs {List} -- list of dicts of all possible jobs
             job {str} -- name of a specific job
             tag {str} -- tag of job/jobs
-            action {str} -- the assigned action to the job (run/dry run)
 
         Returns:
             {dict} -- list of jobs mapped by their name
@@ -128,13 +120,18 @@ class Dispatcher(object):
         if not actual_jobs:
             print('Did not find matching jobs!')
             exit(1)
-
-        for job_name, job in actual_jobs.items():
-            job['action'] = action
-
         return actual_jobs
 
-    def dispatch(self):
+    def run(self, action):
+        if action == 'run' or action == 'dry':
+            self.dispatch(action)
+        elif action == 'report':
+            self.report()
+        elif action == 'stop':
+            self.send_stop()
+        self.close()
+
+    def dispatch(self, action):
         """Dispatching jobs to workers
 
         Given the slots available and slots needed, send jobs to workers.
@@ -158,15 +155,16 @@ class Dispatcher(object):
             raise Exception('Not enough resources for all jobs!')
 
         for job_name, worker in self.job_mapping.items():
+            self.jobs[job_name]['action'] = action
             self._send(worker, self.jobs[job_name])
-            self.client.close()
+            self.close()
 
     def report(self):
         for worker in self.workers.values():
-            self._send(worker, {'action': 'report', 'name': 'report'})
+            self._send(worker, {'action': 'report'})
             while True:
                 try:
-                    data = self.client.recv()
+                    data = self._recv()
                 except (ValueError, OSError) as e:
                     print("No response from {}".format(worker['name']))
                     print(e.message)
@@ -176,14 +174,21 @@ class Dispatcher(object):
                     print(e.message)
                     continue
                 print(data)
-                self.client.close()
+                self.close()
                 break
+
+    def send_stop(self):
+        for worker in self.workers.values():
+            print("Sending stop to {}".format(worker['name']))
+            self._send(worker, {'action': 'stop'})
+            self.close()
 
     def _send(self, worker, data):
         self.client.connect(worker['hostname'], worker['port'])
-        print('Sending {} to {}:{}'.format(
-            data['name'], worker['name'], worker['port']))
         self.client.send(data)
+
+    def _recv(self):
+        return self.client.recv()
 
     def close(self):
         self.client.close()
@@ -252,7 +257,7 @@ if __name__ == '__main__':
         action = 'report'
 
     dispatcher = Dispatcher(config, job=args.job, tag=args.tag,
-                            worker=args.worker, action=action)
-    # dispatcher.dispatch()
+                            worker=args.worker)
+    dispatcher.run(action)
     dispatcher.close()
     exit(0)

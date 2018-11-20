@@ -129,7 +129,7 @@ class Worker(object):
             event.set()
         # terminate all currently running processes
         for proc in self._pending_procs.values():
-            if proc.returncode is not None:
+            if proc.poll() is None:
                 proc.terminate()
         # this shouldn't do anything
         for thread in self._threads.values():
