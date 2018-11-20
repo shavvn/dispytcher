@@ -141,11 +141,15 @@ class Worker(object):
 
     def report(self):
         stat = {"running_procs": len(self._pending_procs)}
+        print(stat)
         try:
+            self.server.settimeout(3.0)
             self.server.send(stat)
+            self.server.settimeout(None)
         except (ValueError, OSError) as e:
             print("cannot send report, continue operation")
             print(e.message)
+        print("stats sent out")
         return
 
 if __name__ == '__main__':

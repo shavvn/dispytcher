@@ -19,13 +19,35 @@ Things TODO:
 import argparse
 import json
 import os
+import socket
 
 from jsonsocket import Client
 
 
 class Dispatcher(object):
 
-    def __init__(self, config, job=None, tag=None, worker=None, action=None):
+    def __init__(self, config, job=None, tag=None, worker=None, group=None,
+                 action=None):
+        """Create a one-time dispatcher sending jobs/actions out
+
+        config contains all of job/worker info so that job/tag/worker/group
+        can be just short names.
+        job/tag sepcify which job/jobs to run, worker/group specify
+        worker/workers to operate.
+        different actions leads to different commands sent to workers
+        Arguments:
+            config {dict} -- config dict that has worker and job info
+
+        Keyword Arguments:
+            job {str} -- job name (default: {None})
+            tag {str} -- tag associates with multiple jobs (default: {None})
+            worker {str} -- worker name (default: {None})
+            group {str} -- worker group that define multiple workers
+                           (default: {None})
+            action {str} -- action, can be run, dry, report or stop
+                           (default: {None})
+        """
+
         if not (job or tag):
             print('No job or tag specified, running all jobs!')
         if job and tag:
@@ -38,15 +60,41 @@ class Dispatcher(object):
         # sender
         self.client = Client()
 
-        job_file = config['jobs']
-        with open(job_file, 'r') as fp:
-            jobs = json.load(fp)
-
-        # figure out actual jobs to run
-        self.jobs = self.get_jobs(jobs, job, tag, action)
-        self.workers = config['workers']
-        self.actiave_workers = []
         self.job_mapping = {}
+
+        # figure out actual jobs or workers
+        self.workers = self.get_workers(config['workers'], worker, group)
+        self.jobs = self.get_jobs(config['jobs'], job, tag, action)
+        if action == 'run' or action == 'dry':
+            self.dispatch()
+        elif action == 'report':
+            self.report()
+
+    def get_workers(self, workers, worker, group):
+        """Filter out actual workers to operate
+
+        Arguments:
+            workers {List} -- list of worker configurations
+            worker {str} -- name of a specific worker
+            group {str} -- group name of worker(s)
+
+        Returns:
+            {dict} -- list of workers mapped by their name
+        """
+        actual_workers = {}
+        if worker:
+            for worker_info in workers:
+                if worker_info['name'] == worker:
+                    actual_workers[worker_info['name']] = worker_info
+                    break
+        elif group:
+            for worker_info in workers:
+                if group in worker_info['groups']:
+                    actual_workers[worker_info['name']] = worker_info
+        else:
+            for worker_info in workers:
+                actual_workers[worker_info['name']] = worker_info
+        return actual_workers
 
     def get_jobs(self, jobs, job, tag, action):
         """Filter out actual jobs to run
@@ -55,7 +103,10 @@ class Dispatcher(object):
         specify job/tag to select among them.
 
         Arguments:
-            jobs {List} -- list of dicts
+            jobs {List} -- list of dicts of all possible jobs
+            job {str} -- name of a specific job
+            tag {str} -- tag of job/jobs
+            action {str} -- the assigned action to the job (run/dry run)
 
         Returns:
             {dict} -- list of jobs mapped by their name
@@ -64,7 +115,7 @@ class Dispatcher(object):
         if job:
             for job_data in jobs:
                 if job_data['name'] == job:
-                    actual_jobs.jobs[job_data['name']] = job_data
+                    actual_jobs[job_data['name']] = job_data
                     break
         elif tag:
             for job_data in jobs:
@@ -94,28 +145,45 @@ class Dispatcher(object):
             Exception -- if not enough worker slots raise this exception
         """
 
-        i = 0
-        worker = self.workers[i]
+        worker_itr = iter(self.workers.values())
+        worker = next(worker_itr)
         for job_name, job in self.jobs.items():
             if job['num_slots'] <= worker['num_slots']:
                 self.job_mapping[job_name] = worker
                 worker['num_slots'] -= job['num_slots']
             else:
-                i += 1
-                worker = self.workers[i]
+                worker = next(worker_itr)
 
         if len(self.job_mapping) < len(self.jobs):
             raise Exception('Not enough resources for all jobs!')
 
         for job_name, worker in self.job_mapping.items():
             self._send(worker, self.jobs[job_name])
+            self.client.close()
 
-    def _send(self, worker, job):
+    def report(self):
+        for worker in self.workers.values():
+            self._send(worker, {'action': 'report', 'name': 'report'})
+            while True:
+                try:
+                    data = self.client.recv()
+                except (ValueError, OSError) as e:
+                    print("No response from {}".format(worker['name']))
+                    print(e.message)
+                    continue
+                except Exception as e:
+                    print('Unexpected error!')
+                    print(e.message)
+                    continue
+                print(data)
+                self.client.close()
+                break
+
+    def _send(self, worker, data):
         self.client.connect(worker['hostname'], worker['port'])
         print('Sending {} to {}:{}'.format(
-            job['name'], worker['name'], worker['port']))
-        self.client.send(job)
-        self.client.close()
+            data['name'], worker['name'], worker['port']))
+        self.client.send(data)
 
     def close(self):
         self.client.close()
@@ -148,6 +216,9 @@ def load_config(config_file):
     if not os.path.exists(jobs_file):
         print('cannot locate jobs file in config!')
         exit(1)
+    with open(jobs_file, 'r') as fp:
+        jobs = json.load(fp)
+    data['jobs'] = jobs
     return data
 
 
@@ -180,8 +251,8 @@ if __name__ == '__main__':
     elif args.report:
         action = 'report'
 
-    dispatcher = Dispatcher(config, args.job, args.tag,
-                            args.worker, action=action)
-    dispatcher.dispatch()
+    dispatcher = Dispatcher(config, job=args.job, tag=args.tag,
+                            worker=args.worker, action=action)
+    # dispatcher.dispatch()
     dispatcher.close()
     exit(0)

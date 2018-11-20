@@ -20,6 +20,15 @@ class Server(object):
     client = None
 
     def __init__(self, host, port):
+        """Create a socket on server
+
+        Arguments:
+            host {str} -- hostname
+            port {int} -- port number
+
+        Keyword Arguments:
+            timeout {float} -- timeout in seconds (default: {3})
+        """
         self.socket = socket.socket()
         self.socket.bind((host, port))
         self.socket.listen(self.backlog)
@@ -52,6 +61,9 @@ class Server(object):
         if self.socket:
             self.socket.close()
             self.socket = None
+
+    def settimeout(self, timeout):
+        self.socket.settimeout(timeout)
 
 
 class Client(object):
@@ -102,6 +114,9 @@ class Client(object):
         if self.socket:
             self.socket.close()
             self.socket = None
+
+    def settimeout(self, timeout):
+        self.socket.settimeout(timeout)
 
 
 # helper functions

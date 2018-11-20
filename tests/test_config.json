@@ -6,7 +6,8 @@
             "name": "local",
             "hostname": "localhost",
             "port": 6666,
-            "num_slots": 4
+            "num_slots": 4,
+            "groups": "test"
         }
     ]
 }
