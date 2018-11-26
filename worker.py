@@ -9,7 +9,9 @@ So yeah, a worker is actually a server from jsonsocket...
 """
 
 import argparse
+import random
 import socket
+import string
 import subprocess
 import threading
 from jsonsocket import Server
@@ -17,7 +19,7 @@ from jsonsocket import Server
 
 class Worker(object):
 
-    def __init__(self, host_name, port):
+    def __init__(self, host_name, port, key):
         """Initialize a server process
 
         Arguments:
@@ -29,6 +31,7 @@ class Worker(object):
         """
         host_ip = socket.gethostbyname(host_name)
         self.server = Server(host_ip, port)
+        self._key = key
 
         # internal book keeping of running jobs
         self._job_id = 0
@@ -40,7 +43,7 @@ class Worker(object):
         while True:
             self.server.accept()  # blocking
             try:
-                data = self.server.recv()
+                data = self._recv()
             except (ValueError, OSError) as e:
                 print('Cannot recv data! Closing socket...')
                 print(e.message)
@@ -152,18 +155,57 @@ class Worker(object):
         print("stats sent out")
         return
 
+    def _recv(self):
+        """Customized receive function
+
+        Returns:
+            dict -- empty if key not match
+        """
+        data = self.server.recv()
+        key = data.get('key')
+        if key != self._key:
+            print("key does not match!, ignore message")
+            return {}
+        else:
+            return data
+
+
+def random_key_gen(n=8):
+    """Generate a random key string
+
+    Keyword Arguments:
+        n {int} -- key length in chars, at least 8 (default: {8})
+
+    Returns:
+        str -- random string
+    """
+    if n < 8:
+        raise ValueError("random key must has 8+ chars")
+    chars = string.ascii_letters + string.digits
+    # random.choices only works with python3.6+
+    return ''.join(random.choice(chars) for _ in range(n))
+
+
 if __name__ == '__main__':
     arg_parser = argparse.ArgumentParser(description='Initialize worker')
     arg_parser.add_argument('hostname', type=str,
                             help='external accessible hostname of this worker')
-    arg_parser.add_argument('-p', '--port', type=int, default=6666)
+    arg_parser.add_argument('-p', '--port', type=int, default=6666,
+                            help='socket port number')
+    arg_parser.add_argument('-k', '--key', type=str, default=random_key_gen(),
+                            help='only work with dispatcher with matching key')
 
     args = arg_parser.parse_args()
     if args.port <= 1024:  # kernel port
         print("try a port # larger than 1024!")
         exit(1)
+    if len(args.key) < 8:
+        print("random key must have 8+ chars")
+        exit(1)
+    print("using key {}".format(args.key))
+
     host_name = args.hostname
-    worker = Worker(host_name, args.port)
+    worker = Worker(host_name, args.port, args.key)
     try:
         worker.start()
     except KeyboardInterrupt:

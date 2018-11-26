@@ -185,6 +185,8 @@ class Dispatcher(object):
 
     def _send(self, worker, data):
         self.client.connect(worker['hostname'], worker['port'])
+        # insert key into every message
+        data['key'] = worker.get('key')
         self.client.send(data)
 
     def _recv(self):
