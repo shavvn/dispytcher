@@ -80,19 +80,15 @@ class Worker(object):
 
         Each command is a list of program + args that can be put into a
         subprocess call.
+        e.g. ["ls", "-la"]
+
         Arguments:
             data {dict} -- job data
 
         Returns:
             [list] -- list of commands
         """
-        cmds = []
-        for cmd_data in data['cmds']:
-            cmd = [cmd_data['cmd']]
-            if cmd_data.get('args'):
-                cmd += cmd_data['args']
-            cmds.append(cmd)
-        return cmds
+        return data['cmds']
 
     def dry_run(self, data):
         print("Job:", data["name"])
