@@ -75,25 +75,41 @@ class Worker(object):
                 continue
         return True
 
-    def prep_cmds(self, data):
-        """Given data prepare the list of commands
+    def prep_proc(self, data):
+        """Prepare the data a subprocess needs
 
-        Each command is a list of program + args that can be put into a
-        subprocess call.
-        e.g. ["ls", "-la"]
+        Currently there are 3 fields:
+        cmd: a list of program + args that can be put into a subprocess call.
+        stdout: standard output file handler
+        stderr: standard error file handler
 
         Arguments:
             data {dict} -- job data
 
         Returns:
-            [list] -- list of commands
+            dict -- key value pairs of the above mentioned fields
         """
-        return data['cmds']
+        stdout = None
+        stderr = stdout
+        stdout_name = data.get('stdout')
+        stderr_name = data.get('stderr')
+        if stdout_name:
+            try:
+                stdout = open(stdout_name, 'w')
+            except Exception as e:
+                print("cannot use {} for stdout".format(stdout_name))
+                pass
+        if stderr_name and stderr_name != stdout_name:
+            try:
+                stderr = open(stderr_name, 'w')
+            except Exception as e:
+                print("cannot use {} for stderr".format(stdout_name))
+                pass
+        return {'cmds': data['cmds'], 'stdout': stdout, 'stderr': stderr}
 
     def dry_run(self, data):
-        print("Job:", data["name"])
-        for cmd in self.prep_cmds(data):
-            print(cmd)
+        print("Job:", data['name'])
+        print(self.prep_proc(data))
         return
 
     def execute(self, data, job_id, stop_event):
@@ -105,12 +121,14 @@ class Worker(object):
             job_id {int} -- job id that each worker keeps track of
             stop_event {threading.Event} -- an event/flag attached to each job
         """
-        for cmd in self.prep_cmds(data):
-            proc = subprocess.Popen(cmd)
+        proc_info = self.prep_proc(data)
+        for cmd in proc_info['cmds']:
+            proc = subprocess.Popen(
+                cmd, stdout=proc_info['stdout'], stderr=proc_info['stderr'])
             self._pending_procs[job_id] = proc
             proc.wait()
             self._pending_procs.pop(job_id)
-            # if forcefully stopped we rely on outsider stop() to clean up
+            # if forcefully stopped we rely on outside stop() to clean up
             if stop_event.is_set():
                 return
         self._thread_stops.pop(job_id)

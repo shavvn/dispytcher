@@ -1,6 +1,8 @@
 [
     {
         "name": "test_one",
+        "stdout": "",
+        "stderr": "",
         "cmds": [
             ["ls"],
             ["echo", "hello world!"]
@@ -11,20 +13,24 @@
         ]
     },
     {
-        "name": "test_job_multicore",
+        "name": "test_long",
+        "stdout": "",
+        "stderr": "",
         "cmds": [
-            ["ls", "-lh"]
+            ["sleep", "5"],
+            ["echo", "wake up"]
         ],
-        "num_slots": 2,
+        "num_slots": 1,
         "tags": [
             "testing"
         ]
     },
     {
-        "name": "test_long",
+        "name": "test_out",
+        "stdout": "tests/stdout.txt",
+        "stderr": "",
         "cmds": [
-            ["sleep", "5"],
-            ["echo", "wake up"]
+            ["echo", "hello world to a file!"]
         ],
         "num_slots": 1,
         "tags": [

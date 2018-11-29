@@ -112,3 +112,5 @@ dmypy.json
 
 .vscode/
 configs/
+tests/stdout.txt
+tests/stderr.txt
