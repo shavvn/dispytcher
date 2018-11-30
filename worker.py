@@ -8,12 +8,22 @@ It receives configurations from dispatcher and run the jobs.
 So yeah, a worker is actually a server from jsonsocket...
 """
 
+# standard library imports
 import argparse
 import random
 import socket
 import string
 import subprocess
 import threading
+
+# thrid party imports
+try:
+    import psutil
+except ImportError:
+    print('psutil not installed! Functionality will be limited')
+    psutil = False
+
+# local packages
 from jsonsocket import Server
 
 
@@ -158,7 +168,13 @@ class Worker(object):
 
     def report(self):
         stat = {"running_procs": len(self._pending_procs)}
-        print(stat)
+        if psutil:
+            mem = psutil.virtual_memory()
+            mega = 1024 * 1024
+            stat['mem_total(MB)'] = round(mem.total / mega)
+            stat['mem_available(MB)'] = round(mem.available / mega)
+            stat['cpu_usage(%)'] = psutil.cpu_percent()
+            stat['mem_usage(%)'] = mem.percent
         try:
             self.server.settimeout(3.0)
             self.server.send(stat)

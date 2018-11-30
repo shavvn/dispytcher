@@ -173,7 +173,9 @@ class Dispatcher(object):
                     print('Unexpected error!')
                     print(e.message)
                     continue
-                print(data)
+                print('Worker "{}":'.format(worker['name']))
+                for key, val in data.items():
+                    print('    {}: {}'.format(key, val))
                 self.close()
                 break
 
