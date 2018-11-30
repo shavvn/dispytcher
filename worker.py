@@ -207,6 +207,7 @@ class Worker(object):
     def _gracefully_exit(self, signum, frame):
         print("Gracefully shutting down...")
         self.stop()
+        self.close()
         exit(0)
 
 
