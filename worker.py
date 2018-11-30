@@ -11,6 +11,7 @@ So yeah, a worker is actually a server from jsonsocket...
 # standard library imports
 import argparse
 import random
+import signal
 import socket
 import string
 import subprocess
@@ -48,6 +49,10 @@ class Worker(object):
         self._threads = {}
         self._thread_stops = {}
         self._pending_procs = {}
+
+        # signal handler to kill the process
+        signal.signal(signal.SIGINT, self._gracefully_exit)
+        signal.signal(signal.SIGTERM, self._gracefully_exit)
 
     def start(self):
         while True:
@@ -199,6 +204,11 @@ class Worker(object):
         else:
             return data
 
+    def _gracefully_exit(self, signum, frame):
+        print("Gracefully shutting down...")
+        self.stop()
+        exit(0)
+
 
 def random_key_gen(n=8):
     """Generate a random key string
@@ -236,9 +246,4 @@ if __name__ == '__main__':
 
     host_name = args.hostname
     worker = Worker(host_name, args.port, args.key)
-    try:
-        worker.start()
-    except KeyboardInterrupt:
-        print('terminating...')
-        worker.stop()
-        exit(0)
+    worker.start()
