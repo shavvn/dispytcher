@@ -34,6 +34,7 @@ class Dispatcher(object):
         job/tag sepcify which job/jobs to run, worker/group specify
         worker/workers to operate.
         different actions leads to different commands sent to workers
+
         Arguments:
             config {dict} -- config dict that has worker and job info
 
@@ -51,7 +52,7 @@ class Dispatcher(object):
             print('Specify only job or tag, not both')
             exit(1)
 
-        if not worker:
+        if not (worker or group):
             print('No worker specified, automatically choosing')
 
         # sender
@@ -161,7 +162,8 @@ class Dispatcher(object):
 
     def report(self):
         for worker in self.workers.values():
-            self._send(worker, {'action': 'report'})
+            if not self._send(worker, {'action': 'report'}):
+                continue
             while True:
                 try:
                     data = self._recv()
@@ -186,10 +188,16 @@ class Dispatcher(object):
             self.close()
 
     def _send(self, worker, data):
-        self.client.connect(worker['hostname'], worker['port'])
-        # insert key into every message
-        data['key'] = worker.get('key')
-        self.client.send(data)
+        try:
+            self.client.connect(worker['hostname'], worker['port'])
+            # insert key into every message
+            data['key'] = worker.get('key')
+            self.client.send(data)
+        except OSError as err:
+            print("Cannot send to worker {}".format(worker['name']))
+            print(err)
+            return False
+        return True
 
     def _recv(self):
         return self.client.recv()
@@ -238,6 +246,8 @@ def init_argparser():
     parser.add_argument('-t', '--tag', type=str, help='specifc job tag')
     parser.add_argument('-w', '--worker', type=str,
                         help='specific worker name')
+    parser.add_argument('-g', '--group', type=str,
+                        help='specific worker group name')
     parser.add_argument('--dry', help='if its a dry run', action='store_true')
     parser.add_argument('--stop',
                         help='stop a job/jobs, only supports "all" option now',
@@ -261,7 +271,7 @@ if __name__ == '__main__':
         action = 'report'
 
     dispatcher = Dispatcher(config, job=args.job, tag=args.tag,
-                            worker=args.worker)
+                            worker=args.worker, group=args.group)
     dispatcher.run(action)
     dispatcher.close()
     exit(0)
