@@ -105,15 +105,15 @@ class Worker(object):
             dict -- key value pairs of the above mentioned fields
         """
         stdout = None
-        stderr = stdout
         stdout_name = data.get('stdout')
-        stderr_name = data.get('stderr')
         if stdout_name:
             try:
                 stdout = open(stdout_name, 'w')
             except Exception as e:
                 print("cannot use {} for stdout".format(stdout_name))
                 pass
+        stderr_name = data.get('stderr')
+        stderr = stdout
         if stderr_name and stderr_name != stdout_name:
             try:
                 stderr = open(stderr_name, 'w')
