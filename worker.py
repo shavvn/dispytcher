@@ -104,6 +104,7 @@ class Worker(object):
         Returns:
             dict -- key value pairs of the above mentioned fields
         """
+        working_dir = data.get('cwd', '.')
         stdout = None
         stdout_name = data.get('stdout')
         if stdout_name:
@@ -120,7 +121,8 @@ class Worker(object):
             except Exception as e:
                 print("cannot use {} for stderr".format(stdout_name))
                 pass
-        return {'cmds': data['cmds'], 'stdout': stdout, 'stderr': stderr}
+        return {'cwd': working_dir, 'cmds': data['cmds'],
+                'stdout': stdout, 'stderr': stderr}
 
     def dry_run(self, data):
         print("Job:", data['name'])
@@ -139,7 +141,8 @@ class Worker(object):
         proc_info = self.prep_proc(data)
         for cmd in proc_info['cmds']:
             proc = subprocess.Popen(
-                cmd, stdout=proc_info['stdout'], stderr=proc_info['stderr'])
+                cmd, cwd=proc_info['cwd'],
+                stdout=proc_info['stdout'], stderr=proc_info['stderr'])
             self._pending_procs[job_id] = proc
             proc.wait()
             self._pending_procs.pop(job_id)
@@ -207,7 +210,7 @@ class Worker(object):
     def _gracefully_exit(self, signum, frame):
         print("Gracefully shutting down...")
         self.stop()
-        self.close()
+        self.server.close()
         exit(0)
 
 
@@ -243,7 +246,6 @@ if __name__ == '__main__':
     if len(args.key) < 8:
         print("random key must have 8+ chars")
         exit(1)
-    print("using key {}".format(args.key))
 
     host_name = args.hostname
     worker = Worker(host_name, args.port, args.key)
