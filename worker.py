@@ -28,6 +28,61 @@ except ImportError:
 from jsonsocket import Server
 
 
+class ProcWrapper(object):
+
+    def __init__(self, job_data):
+        """A Wrapper around Popen object for ease management
+
+        Arguments:
+            job_data {dict} -- deserialized job data received from socket
+        Raised:
+            ValueError -- if job name or cmds does not make sense
+        """
+        # it should be noted that name is not unique
+        self.name = job_data.get('name')
+        if not self.name:
+            raise ValueError("Job name not received!")
+
+        self.cmds = job_data.get('cmds')
+        if not self.cmds or (not isinstance(self.cmds, list)):
+            raise ValueError("Job cmds not correct!")
+
+        self.cwd = job_data.get('cwd', '.')
+        self.stdout = None
+        stdout_name = job_data.get('stdout')
+        if stdout_name:
+            try:
+                self.stdout = open(stdout_name, 'w')
+            except Exception as e:
+                print("cannot use {} for stdout".format(stdout_name))
+        self.stderr = self.stdout
+        stderr_name = job_data.get('stderr')
+        if stderr_name and stderr_name != stdout_name:
+            try:
+                self.stderr = open(stderr_name, 'w')
+            except Exception as e:
+                print("cannot use {} for stderr".format(stdout_name))
+
+        # actual Popen object
+        self._proc = None
+
+    def run(self, cmd):
+        self._proc = subprocess.Popen(
+            cmd, cwd=self.cwd,
+            stdout=self.stdout, stderr=self.stderr)
+        return self
+
+    def wait(self):
+        """Blocking call"""
+        return self._proc.wait()
+
+    def poll(self):
+        return self._proc.poll()
+
+    def terminate(self):
+        return self._proc.terminate()
+
+
 class Worker(object):
 
     def __init__(self, host_name, port, key):
@@ -44,8 +99,13 @@ class Worker(object):
         self.server = Server(host_ip, port)
         self._key = key
 
-        # internal book keeping of running jobs
+        # unique id for each job received
         self._job_id = 0
+
+        # because it's highly likely to receive multiple jobs at once
+        # and each job can take very long, we don't want to block following
+        # jobs, so we use one thread for each job received and use these
+        # data structures to keep track of threads, indexed by _job_id
         self._threads = {}
         self._thread_stops = {}
         self._pending_procs = {}
@@ -138,17 +198,16 @@ class Worker(object):
             job_id {int} -- job id that each worker keeps track of
             stop_event {threading.Event} -- an event/flag attached to each job
         """
-        proc_info = self.prep_proc(data)
-        for cmd in proc_info['cmds']:
-            proc = subprocess.Popen(
-                cmd, cwd=proc_info['cwd'],
-                stdout=proc_info['stdout'], stderr=proc_info['stderr'])
-            self._pending_procs[job_id] = proc
+        proc = ProcWrapper(data)
+        self._pending_procs[job_id] = proc
+        for cmd in proc.cmds:
+            proc.run(cmd)
             proc.wait()
-            self._pending_procs.pop(job_id)
-            # if forcefully stopped we rely on outside stop() to clean up
+            # if receiving stop signal, do not run subsequent cmds
             if stop_event.is_set():
                 return
+        # normal finishing procedures
+        self._pending_procs.pop(job_id)
         self._thread_stops.pop(job_id)
         self._threads.pop(job_id)
 
