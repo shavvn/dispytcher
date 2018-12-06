@@ -234,7 +234,8 @@ class Worker(object):
         self._threads.clear()
 
     def report(self):
-        stat = {"running_procs": len(self._pending_procs)}
+        stat = {"running_procs": [p.name
+                                  for p in self._pending_procs.values()]}
         if psutil:
             mem = psutil.virtual_memory()
             mega = 1024 * 1024

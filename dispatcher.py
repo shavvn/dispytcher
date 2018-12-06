@@ -20,6 +20,7 @@ import argparse
 import json
 import os
 import socket
+from collections import OrderedDict
 
 from jsonsocket import Client
 
@@ -169,11 +170,11 @@ class Dispatcher(object):
                     data = self._recv()
                 except (ValueError, OSError) as e:
                     print("No response from {}".format(worker['name']))
-                    print(e.message)
+                    print(e)
                     continue
                 except Exception as e:
                     print('Unexpected error!')
-                    print(e.message)
+                    print(e)
                     continue
                 print('Worker "{}":'.format(worker['name']))
                 for key, val in data.items():
@@ -200,7 +201,11 @@ class Dispatcher(object):
         return True
 
     def _recv(self):
-        return self.client.recv()
+        data = self.client.recv()
+        sorted_data = OrderedDict()
+        for key, val in sorted(data.items()):
+            sorted_data[key] = val
+        return sorted_data
 
     def close(self):
         self.client.close()
