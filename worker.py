@@ -11,6 +11,7 @@ So yeah, a worker is actually a server from jsonsocket...
 # standard library imports
 import argparse
 import json
+import os
 import random
 import signal
 import socket
@@ -49,6 +50,13 @@ class ProcWrapper(object):
             raise ValueError("Job cmds not correct!")
 
         self.cwd = job_data.get('cwd', '.')
+        if not os.path.exists(self.cwd):
+            try:
+                os.mkdir(self.cwd)
+            except:
+                print("Invalid CWD!")
+                self.cwd = '.'
+
         self.stdout = None
         stdout_name = job_data.get('stdout')
         if stdout_name:
