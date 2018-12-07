@@ -10,6 +10,7 @@ So yeah, a worker is actually a server from jsonsocket...
 
 # standard library imports
 import argparse
+import json
 import random
 import signal
 import socket
@@ -292,21 +293,47 @@ def random_key_gen(n=8):
 
 if __name__ == '__main__':
     arg_parser = argparse.ArgumentParser(description='Initialize worker')
-    arg_parser.add_argument('hostname', type=str,
+    arg_parser.add_argument('-c', '--config', type=str,
+                            help='config json file contains host info.\n'
+                            'Must have following fields: hostname, port')
+    arg_parser.add_argument('-H', '--hostname', type=str,
                             help='external accessible hostname of this worker')
     arg_parser.add_argument('-p', '--port', type=int, default=6666,
                             help='socket port number')
-    arg_parser.add_argument('-k', '--key', type=str, default=random_key_gen(),
+    arg_parser.add_argument('-k', '--key', type=str,
                             help='only work with dispatcher with matching key')
 
     args = arg_parser.parse_args()
-    if args.port <= 1024:  # kernel port
-        print("try a port # larger than 1024!")
-        exit(1)
-    if len(args.key) < 8:
-        print("random key must have 8+ chars")
+
+    hostname = None
+    port = None
+    key = None
+    if args.hostname and not args.config:
+        hostname = args.hostname
+        print("")
+        if args.port <= 1024:  # kernel port
+            print("try a port # larger than 1024!")
+            exit(1)
+        port = args.port
+    elif args.config and not args.hostname:
+        with open(args.config, 'r') as fp:
+            config = json.load(fp)
+            hostname = config['hostname']
+            port = config['port']
+            if config.get('key'):  # may want key be secret
+                key = config['key']
+        pass
+    else:
+        print("please specify either hostname or config file")
         exit(1)
 
-    host_name = args.hostname
-    worker = Worker(host_name, args.port, args.key)
+    if not key:
+        if not args.key:
+            key = random_key_gen(12)
+        elif len(args.key) < 8:
+            print("key must have 8+ chars")
+            exit(1)
+        else:
+            key = args.key
+    worker = Worker(hostname, port, key)
     worker.start()
