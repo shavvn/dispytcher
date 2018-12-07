@@ -131,6 +131,8 @@ class Dispatcher(object):
             self.report()
         elif action == 'stop':
             self.send_stop()
+        elif action == 'retire':
+            self.send_retire()
         self.close()
 
     def dispatch(self, action):
@@ -186,6 +188,12 @@ class Dispatcher(object):
         for worker in self.workers.values():
             print("Sending stop to {}".format(worker['name']))
             self._send(worker, {'action': 'stop'})
+            self.close()
+
+    def send_retire(self):
+        for worker in self.workers.values():
+            print("Sending retire to {}".format(worker['name']))
+            self._send(worker, {'action': 'retire'})
             self.close()
 
     def _send(self, worker, data):
@@ -259,6 +267,8 @@ def init_argparser():
                         action='store_true')
     parser.add_argument('--report', help='report job status(NOT implemented)',
                         action='store_true')
+    parser.add_argument('--retire', help='shut down worker for good',
+                        action='store_true')
     return parser
 
 
@@ -274,6 +284,8 @@ if __name__ == '__main__':
         action = 'stop'
     elif args.report:
         action = 'report'
+    elif args.retire:
+        action = 'retire'
 
     dispatcher = Dispatcher(config, job=args.job, tag=args.tag,
                             worker=args.worker, group=args.group)

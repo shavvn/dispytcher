@@ -147,6 +147,8 @@ class Worker(object):
                 self._job_id += 1
             elif action == 'report':
                 self.report()
+            elif action == 'retire':
+                self._gracefully_exit(None, None)
             else:
                 continue
         return True
