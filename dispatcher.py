@@ -9,7 +9,6 @@ and the dispatcher automatically figures out the rest...
 
 Things TODO:
 
-1. define the json format that server and client use to communicate about jobs
 2. automatic dispatching from the 'workers' list based on the resources needed
 3. command line to json conversion
 4. should probably make use of regristry for lookup
@@ -52,9 +51,6 @@ class Dispatcher(object):
         if job and tag:
             print('Specify only job or tag, not both')
             exit(1)
-
-        if not (worker or group):
-            print('No worker specified, automatically choosing')
 
         # sender
         self.client = Client()
@@ -161,6 +157,7 @@ class Dispatcher(object):
         for job_name, worker in self.job_mapping.items():
             self.jobs[job_name]['action'] = action
             self._send(worker, self.jobs[job_name])
+            print('sent job {} to {}'.format(job_name, worker['name']))
             self.close()
 
     def report(self):
@@ -192,7 +189,7 @@ class Dispatcher(object):
 
     def send_retire(self):
         for worker in self.workers.values():
-            print("Sending retire to {}".format(worker['name']))
+            print("Retiring worker {}".format(worker['name']))
             self._send(worker, {'action': 'retire'})
             self.close()
 

@@ -30,31 +30,36 @@ except ImportError:
 from jsonsocket import Server
 
 
-class ProcWrapper(object):
+class Job(object):
 
-    def __init__(self, job_data):
-        """A Wrapper around Popen object for ease management
+    def __init__(self, job_data, job_id):
+        """A Job class for ease management
+
+        A job can have multiple commands, but only ONE cwd, stdout, stderr.
+        All the commands should be executed in order, one by one.
 
         Arguments:
             job_data {dict} -- deserialized job data received from socket
+            job_id {int} -- unique id assigned by worker
         Raised:
             ValueError -- if job name or cmds does not make sense
         """
-        # it should be noted that name is not unique
+        # it should be noted that name may not be unique
         self.name = job_data.get('name')
         if not self.name:
             raise ValueError("Job name not received!")
+        self.id = job_id
 
         self.cmds = job_data.get('cmds')
         if not self.cmds or (not isinstance(self.cmds, list)):
-            raise ValueError("Job cmds not correct!")
+            raise ValueError("Job cmds format not correct!")
 
         self.cwd = job_data.get('cwd', '.')
         if not os.path.exists(self.cwd):
             try:
                 os.mkdir(self.cwd)
             except:
-                print("Invalid CWD!")
+                print("Invalid CWD! {}".format(self.cwd))
                 self.cwd = '.'
 
         self.stdout = None
@@ -64,6 +69,8 @@ class ProcWrapper(object):
                 self.stdout = open(stdout_name, 'w')
             except Exception as e:
                 print("cannot use {} for stdout".format(stdout_name))
+                print(e)
+
         self.stderr = self.stdout
         stderr_name = job_data.get('stderr')
         if stderr_name and stderr_name != stdout_name:
@@ -71,6 +78,7 @@ class ProcWrapper(object):
                 self.stderr = open(stderr_name, 'w')
             except Exception as e:
                 print("cannot use {} for stderr".format(stdout_name))
+                print(e)
 
         # actual Popen object
         self._proc = None
@@ -90,6 +98,13 @@ class ProcWrapper(object):
 
     def terminate(self):
         return self._proc.terminate()
+
+    def flush(self):
+        """Flush stdout & stderr buffers"""
+        if self.stdout:
+            self.stdout.flush()
+        if self.stderr:
+            self.stderr.flush()
 
 
 class Worker(object):
@@ -115,9 +130,10 @@ class Worker(object):
         # and each job can take very long, we don't want to block following
         # jobs, so we use one thread for each job received and use these
         # data structures to keep track of threads, indexed by _job_id
+        # we use {} instead of [] as they are more robust for multi-threads
         self._threads = {}
         self._thread_stops = {}
-        self._pending_procs = {}
+        self._running_jobs = {}
 
         # signal handler to kill the process
         signal.signal(signal.SIGINT, self._gracefully_exit)
@@ -151,8 +167,8 @@ class Worker(object):
                 )
                 self._thread_stops[self._job_id] = stop_event
                 self._threads[self._job_id] = thread
-                thread.start()
                 self._job_id += 1
+                thread.start()
             elif action == 'report':
                 self.report()
             elif action == 'retire':
@@ -161,43 +177,9 @@ class Worker(object):
                 continue
         return True
 
-    def prep_proc(self, data):
-        """Prepare the data a subprocess needs
-
-        Currently there are 3 fields:
-        cmd: a list of program + args that can be put into a subprocess call.
-        stdout: standard output file handler
-        stderr: standard error file handler
-
-        Arguments:
-            data {dict} -- job data
-
-        Returns:
-            dict -- key value pairs of the above mentioned fields
-        """
-        working_dir = data.get('cwd', '.')
-        stdout = None
-        stdout_name = data.get('stdout')
-        if stdout_name:
-            try:
-                stdout = open(stdout_name, 'w')
-            except Exception as e:
-                print("cannot use {} for stdout".format(stdout_name))
-                pass
-        stderr_name = data.get('stderr')
-        stderr = stdout
-        if stderr_name and stderr_name != stdout_name:
-            try:
-                stderr = open(stderr_name, 'w')
-            except Exception as e:
-                print("cannot use {} for stderr".format(stdout_name))
-                pass
-        return {'cwd': working_dir, 'cmds': data['cmds'],
-                'stdout': stdout, 'stderr': stderr}
-
     def dry_run(self, data):
         print("Job:", data['name'])
-        print(self.prep_proc(data))
+        print(data['cmds'])
         return
 
     def execute(self, data, job_id, stop_event):
@@ -209,21 +191,21 @@ class Worker(object):
             job_id {int} -- job id that each worker keeps track of
             stop_event {threading.Event} -- an event/flag attached to each job
         """
-        proc = ProcWrapper(data)
-        self._pending_procs[job_id] = proc
-        for cmd in proc.cmds:
-            proc.run(cmd)
-            proc.wait()
+        job = Job(data, job_id)
+        self._running_jobs[job_id] = job
+        for cmd in job.cmds:
+            job.run(cmd)
+            job.wait()
             # if receiving stop signal, do not run subsequent cmds
             if stop_event.is_set():
                 return
         # normal finishing procedures
-        self._pending_procs.pop(job_id)
+        self._running_jobs.pop(job_id)
         self._thread_stops.pop(job_id)
         self._threads.pop(job_id)
 
     def stop(self):
-        """Stop jobs that are running
+        """Stop all jobs that are running
 
         Eventually we want something that can stop one specific job
         but for now we just shut down everything that's running on this worker
@@ -233,20 +215,54 @@ class Worker(object):
         for event in self._thread_stops.values():
             event.set()
         # terminate all currently running processes
-        for proc in self._pending_procs.values():
-            if proc.poll() is None:
-                proc.terminate()
+        for job in self._running_jobs.values():
+            if job.poll() is None:
+                job.terminate()
         # this shouldn't do anything
         for thread in self._threads.values():
             thread.join()
         print("all threads & processes terminated!")
-        self._pending_procs.clear()
+        self._running_jobs.clear()
         self._thread_stops.clear()
         self._threads.clear()
 
+    def show_output(self, job_data):
+        """Show stdout and stderr of a job
+
+        The stdout and stderr will be flushed, and the contents will be
+        sent to dispatcher as text/str over socket
+        Only send the last 20 lines of output
+
+        Arguments:
+            job_name {dict} -- job data
+        """
+        job = None
+        send_lines = None
+        for j in self._running_jobs.values():
+            if j.name == job_name:
+                job = j
+        if job:
+            job.flush()
+            with open(job.stdout.name, 'r') as fp:
+                lines = fp.readlines()
+                if len(lines) > 20:
+                    send_lines = lines[-20:]
+                else:
+                    send_lines = lines
+        else:
+            with open(job_data['stdout'], 'r') as fp:
+                lines = fp.readlines()
+                if len(lines) > 20:
+                    send_lines = lines[-20:]
+                else:
+                    send_lines = lines
+        if send_lines:
+            self.server.send(send_lines)
+
     def report(self):
-        stat = {"running_procs": [p.name
-                                  for p in self._pending_procs.values()]}
+        running_jobs = [j.name for j in self._running_jobs.values()]
+        stat = {"running_jobs": running_jobs}
+
         if psutil:
             mem = psutil.virtual_memory()
             mega = 1024 * 1024
