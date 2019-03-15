@@ -1,6 +1,4 @@
 {
-    "local_registry" : "./",
-    "jobs": "./tests/test_jobs.json",
     "workers" : [
         {
             "name": "local",

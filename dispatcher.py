@@ -18,6 +18,7 @@ Things TODO:
 import argparse
 import json
 import os
+import sys
 import socket
 from collections import OrderedDict
 
@@ -26,7 +27,8 @@ from jsonsocket import Client
 
 class Dispatcher(object):
 
-    def __init__(self, config, job=None, tag=None, worker=None, group=None):
+    def __init__(self, union_config, listing_config, job=None,
+                 tag=None, worker=None, group=None):
         """Create a one-time dispatcher sending jobs/actions out
 
         config contains all of job/worker info so that job/tag/worker/group
@@ -230,62 +232,76 @@ def load_config(config_file):
 
     with open(config_file, 'r') as fp:
         data = json.load(fp)
-    # basic sanity check
-    if 'workers' not in data or len(data['workers']) == 0:
-        print('No workers in config file!')
-        exit(1)
-
-    if 'jobs' not in data:
-        print('No jobs in config file!')
-        exit(1)
-
-    jobs_file = data['jobs']
-    if not os.path.exists(jobs_file):
-        print('cannot locate jobs file in config!')
-        exit(1)
-    with open(jobs_file, 'r') as fp:
-        jobs = json.load(fp)
-    data['jobs'] = jobs
     return data
 
 
-def init_argparser():
-    parser = argparse.ArgumentParser(description='Dispatcher process')
-    parser.add_argument('config', type=str, help='configuration file')
-    parser.add_argument('-j', '--job', type=str, help='specifc job name')
-    parser.add_argument('-t', '--tag', type=str, help='specifc job tag')
+def add_worker_options(parser):
+    parser.add_argument('-u', '--union', type=str,
+                        help='json file that has list of all available workers'
+                        '. Default value supplied to save typing',
+                        default='workers.json')
     parser.add_argument('-w', '--worker', type=str,
                         help='specific worker name')
     parser.add_argument('-g', '--group', type=str,
                         help='specific worker group name')
-    parser.add_argument('--dry', help='if its a dry run', action='store_true')
-    parser.add_argument('--stop',
-                        help='stop a job/jobs, only supports "all" option now',
-                        action='store_true')
-    parser.add_argument('--report', help='report job status(NOT implemented)',
-                        action='store_true')
-    parser.add_argument('--retire', help='shut down worker for good',
-                        action='store_true')
     return parser
+
+
+def add_job_options(parser):
+    parser.add_argument('-l', '--listings', type=str,
+                        help='json file that has list of all available jobs'
+                        '. Default value supplied to save typing',
+                        default='jobs.json')
+    parser.add_argument('-j', '--job', type=str, help='specifc job name')
+    parser.add_argument('-t', '--tag', type=str, help='specifc job tag')
+    return parser
+
+
+def init_argparser():
+    # main parser
+    parser = argparse.ArgumentParser(description='Dispatcher')
+    subparsers = parser.add_subparsers(
+        dest='sub_cmd', title='sub-commands', help='sub-command help')
+
+    # sub command parsers
+    run_cmd = subparsers.add_parser('run', help='run one or more jobs')
+    stop_cmd = subparsers.add_parser('stop', help='stop one or more jobs')
+    retire_cmd = subparsers.add_parser(
+        'retire', help='retire worker for good')
+    report_cmd = subparsers.add_parser(
+        'report', help='report worker status (jobs, CPU, mem)')
+    add_job_options(run_cmd)
+    add_job_options(stop_cmd)
+    for cmd in [run_cmd, stop_cmd, report_cmd, retire_cmd]:
+        add_worker_options(cmd)
+
+    return parser
+
+
+def sanitize_args(args):
+    if args.sub_cmd == 'run' or args.sub_cmd == 'stop':
+        if not args.listings:
+            print('"run" or "stop" command need job listings', file=sys.stderr)
+            exit(1)
 
 
 if __name__ == '__main__':
     arg_parser = init_argparser()
     args = arg_parser.parse_args()
+    if not args.sub_cmd:
+        print("Sub-command required!", file=sys.stderr)
+        arg_parser.print_help()
 
-    config = load_config(args.config)
-    action = 'run'
-    if args.dry:
-        action = 'dry'
-    elif args.stop:
-        action = 'stop'
-    elif args.report:
-        action = 'report'
-    elif args.retire:
-        action = 'retire'
+    print(args)
+    union_config = load_config(args.union)
+    listing_config = load_config(args.listings)
 
-    dispatcher = Dispatcher(config, job=args.job, tag=args.tag,
-                            worker=args.worker, group=args.group)
-    dispatcher.run(action)
-    dispatcher.close()
-    exit(0)
+    # hmmm it's stateless anyway why do I need an object..
+    dispatcher = Dispatcher(union_config, job=args.job,
+                            tag=args.tag, worker=args.worker)
+
+    # dispatcher = Dispatcher(config, job=args.job, tag=args.tag,
+    #                         worker=args.worker, group=args.group)
+    # dispatcher.run(action)
+    # dispatcher.close()
+    # exit(0)
