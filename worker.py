@@ -173,6 +173,8 @@ class Worker(object):
                 self.report()
             elif action == 'retire':
                 self._gracefully_exit(None, None)
+            elif action == 'debug':
+                print(data)
             else:
                 continue
         return True

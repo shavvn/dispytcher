@@ -10,9 +10,6 @@ and the dispatcher automatically figures out the rest...
 Things TODO:
 
 2. automatic dispatching from the 'workers' list based on the resources needed
-3. command line to json conversion
-4. should probably make use of regristry for lookup
-    - should it be local or remote or both? (thinking remote now..)
 """
 
 import argparse
@@ -20,216 +17,192 @@ import json
 import os
 import sys
 import socket
+import time
 from collections import OrderedDict
 
 from jsonsocket import Client
 
 
-class Dispatcher(object):
-
-    def __init__(self, union_config, listing_config, job=None,
-                 tag=None, worker=None, group=None):
-        """Create a one-time dispatcher sending jobs/actions out
-
-        config contains all of job/worker info so that job/tag/worker/group
-        can be just short names.
-        job/tag sepcify which job/jobs to run, worker/group specify
-        worker/workers to operate.
-        different actions leads to different commands sent to workers
-
-        Arguments:
-            config {dict} -- config dict that has worker and job info
-
-        Keyword Arguments:
-            job {str} -- job name (default: {None})
-            tag {str} -- tag associates with multiple jobs (default: {None})
-            worker {str} -- worker name (default: {None})
-            group {str} -- worker group that define multiple workers
-                           (default: {None})
-        """
-
-        if not (job or tag):
-            print('No job or tag specified, running all jobs!')
-        if job and tag:
-            print('Specify only job or tag, not both')
-            exit(1)
-
-        # sender
-        self.client = Client()
-
-        self.job_mapping = {}
-
-        # figure out actual jobs or workers
-        self.workers = self.get_workers(config['workers'], worker, group)
-        self.jobs = self.get_jobs(config['jobs'], job, tag)
-
-    def get_workers(self, workers, worker, group):
-        """Filter out actual workers to operate
-
-        Arguments:
-            workers {List} -- list of worker configurations
-            worker {str} -- name of a specific worker
-            group {str} -- group name of worker(s)
-
-        Returns:
-            {dict} -- list of workers mapped by their name
-        """
-        actual_workers = {}
-        if worker:
-            for worker_info in workers:
-                if worker_info['name'] == worker:
-                    actual_workers[worker_info['name']] = worker_info
-                    break
-        elif group:
-            for worker_info in workers:
-                if group in worker_info['groups']:
-                    actual_workers[worker_info['name']] = worker_info
-        else:
-            for worker_info in workers:
-                actual_workers[worker_info['name']] = worker_info
-        return actual_workers
-
-    def get_jobs(self, jobs, job, tag):
-        """Filter out actual jobs to run
-
-        The config file should provide a full list of jobs, and the user
-        specify job/tag to select among them.
-
-        Arguments:
-            jobs {List} -- list of dicts of all possible jobs
-            job {str} -- name of a specific job
-            tag {str} -- tag of job/jobs
-
-        Returns:
-            {dict} -- list of jobs mapped by their name
-        """
-        actual_jobs = {}
-        if job:
-            for job_data in jobs:
-                if job_data['name'] == job:
-                    actual_jobs[job_data['name']] = job_data
-                    break
-        elif tag:
-            for job_data in jobs:
-                if tag in job_data['tags']:
-                    actual_jobs[job_data['name']] = job_data
-        else:
-            for job_data in jobs:
-                actual_jobs[job_data['name']] = job_data
-
-        if not actual_jobs:
-            print('Did not find matching jobs!')
-            exit(1)
-        return actual_jobs
-
-    def run(self, action):
-        if action == 'run' or action == 'dry':
-            self.dispatch(action)
-        elif action == 'report':
-            self.report()
-        elif action == 'stop':
-            self.send_stop()
-        elif action == 'retire':
-            self.send_retire()
-        self.close()
-
-    def dispatch(self, action):
-        """Dispatching jobs to workers
-
-        Given the slots available and slots needed, send jobs to workers.
-
-        TODO test which workers are actually online and how busy they are
-        TODO save jobs that are not sent out successfully for a resend later
-        Raises:
-            Exception -- if not enough worker slots raise this exception
-        """
-
-        worker_itr = iter(self.workers.values())
-        worker = next(worker_itr)
-        for job_name, job in self.jobs.items():
-            if job['num_slots'] <= worker['num_slots']:
-                self.job_mapping[job_name] = worker
-                worker['num_slots'] -= job['num_slots']
-            else:
-                worker = next(worker_itr)
-
-        if len(self.job_mapping) < len(self.jobs):
-            raise Exception('Not enough resources for all jobs!')
-
-        for job_name, worker in self.job_mapping.items():
-            self.jobs[job_name]['action'] = action
-            self._send(worker, self.jobs[job_name])
-            print('sent job {} to {}'.format(job_name, worker['name']))
-            self.close()
-
-    def report(self):
-        for worker in self.workers.values():
-            if not self._send(worker, {'action': 'report'}):
-                continue
-            while True:
-                try:
-                    data = self._recv()
-                except (ValueError, OSError) as e:
-                    print("No response from {}".format(worker['name']))
-                    print(e)
-                    continue
-                except Exception as e:
-                    print('Unexpected error!')
-                    print(e)
-                    continue
-                print('Worker "{}":'.format(worker['name']))
-                for key, val in data.items():
-                    print('    {}: {}'.format(key, val))
-                self.close()
-                break
-
-    def send_stop(self):
-        for worker in self.workers.values():
-            print("Sending stop to {}".format(worker['name']))
-            self._send(worker, {'action': 'stop'})
-            self.close()
-
-    def send_retire(self):
-        for worker in self.workers.values():
-            print("Retiring worker {}".format(worker['name']))
-            self._send(worker, {'action': 'retire'})
-            self.close()
-
-    def _send(self, worker, data):
-        try:
-            self.client.connect(worker['hostname'], worker['port'])
-            # insert key into every message
-            data['key'] = worker.get('key')
-            self.client.send(data)
-        except OSError as err:
-            print("Cannot send to worker {}".format(worker['name']))
-            print(err)
-            return False
-        return True
-
-    def _recv(self):
-        data = self.client.recv()
-        sorted_data = OrderedDict()
-        for key, val in sorted(data.items()):
-            sorted_data[key] = val
-        return sorted_data
-
-    def close(self):
-        self.client.close()
+def send(client, worker, data):
+    try:
+        client.connect(worker['hostname'], worker['port'])
+        # insert key into every message
+        data['key'] = worker.get('key')
+        client.send(data)
+    except OSError as err:
+        print("Cannot send to worker {}".format(worker['name']))
+        print(err)
+        return False
+    return True
 
 
-def load_config(config_file):
-    """Loading config json file and return a dict
+def recv(client):
+    data = client.recv()
+    sorted_data = OrderedDict()
+    for key, val in sorted(data.items()):
+        sorted_data[key] = val
+    return sorted_data
 
-    Also do some basic sanity check here
+
+def get_workers(workers, worker, group):
+    """Filter out actual workers to operate
 
     Arguments:
-        config_file {str} -- config json file
+        workers {List} -- list of worker configurations
+        worker {str} -- name of a specific worker
+        group {str} -- group name of worker(s)
 
     Returns:
-        dict -- dict of that json
+        {list} -- list of workers mapped by their name
     """
+    actual_workers = []
+    if worker:
+        for worker_info in workers:
+            if worker_info['name'] == worker:
+                actual_workers.append(worker_info)
+                break
+    elif group:
+        for worker_info in workers:
+            if group in worker_info['groups']:
+                actual_workers.append(worker_info)
+    else:
+        for worker_info in workers:
+            actual_workers.append(worker_info)
+    return actual_workers
 
+
+def get_jobs(jobs, job, tag):
+    """Filter out actual jobs to run
+
+    The config file should provide a full list of jobs, and the user
+    specify job/tag to select among them.
+
+    Arguments:
+        jobs {List} -- list of dicts of all possible jobs
+        job {str} -- name of a specific job
+        tag {str} -- tag of job/jobs
+
+    Returns:
+        {list} -- list of jobs mapped by their name
+    """
+    actual_jobs = []
+    if job:
+        for job_data in jobs:
+            if job_data['name'] == job:
+                actual_jobs.append(job_data)
+                break
+    elif tag:
+        for job_data in jobs:
+            if tag in job_data['tags']:
+                actual_jobs.append(job_data)
+    else:
+        for job_data in jobs:
+            actual_jobs.append(job_data)
+
+    if not actual_jobs:
+        print('Did not find matching jobs!')
+        exit(1)
+    return actual_jobs
+
+
+def run(workers, jobs, job=None, tag=None, worker=None, group=None):
+    actual_workers = get_workers(workers, worker, group)
+    actual_jobs = get_jobs(jobs, job, tag)
+    total_slots = sum([w['num_slots'] for w in actual_workers])
+    if total_slots < len(actual_jobs):
+        print('Warning! More jobs than workers can handle!',
+              'Jobs that cannot be sent will be dumped as remaining_jobs.json')
+        remaining_jobs = actual_jobs[total_slots:]
+    else:
+        remaining_jobs = []
+
+    # we do round robin assignment of jobs to workers
+    assignment = {}
+    i, j = 0, 0
+    while i < min(len(actual_jobs), total_slots):
+        if j == len(actual_workers):
+            j = 0
+        worker = actual_workers[j]
+        if worker['num_slots'] > 0:
+            assignment[i] = j
+            worker['num_slots'] -= 1
+            j += 1
+            i += 1
+        else:
+            j += 1
+
+    for i, j in assignment.items():
+        print("Assigning {} to {}".format(actual_jobs[i]['name'],
+                                          actual_workers[j]['name']))
+
+    client = Client()
+    for i, j in assignment.items():
+        job = actual_jobs[i]
+        worker = actual_workers[j]
+        job['action'] = 'run'
+        if not send(client, worker, job):
+            remaining_jobs.append(job)
+        else:
+            print('Sent job {} to {}'.format(job['name'], worker['name']))
+        client.close()
+        time.sleep(0.1)
+
+    if len(remaining_jobs) > 0:
+        with open('remaining_jobs.json', 'w') as fp:
+            json.dump(remaining_jobs, fp)
+    return
+
+
+def report(workers):
+    client = Client()
+    for worker in workers:
+        if not send(client, worker, {'action': 'report'}):
+            print("Cannot ask report for {}".format(worker['name']))
+            continue
+        while True:
+            try:
+                data = recv(client)
+            except (ValueError, OSError) as e:
+                print("No response from {}".format(worker['name']))
+                print(e)
+                break
+            except Exception as e:
+                print('Unexpected error!')
+                print(e)
+                break
+            print('Worker "{}":'.format(worker['name']))
+            for key, val in data.items():
+                print('    {}: {}'.format(key, val))
+            client.close()
+            break
+
+
+def broadcast(workers, message):
+    """Broadcasting message to workers
+
+    Expect no reply, skip when encounters failure
+    Arguments:
+        workers {list} -- list of workers to be broadcasted to
+        message {obj} -- json compatible data structures
+    """
+    client = Client()
+    for worker in workers:
+        print("Broadcasting to {}".format(worker['name']))
+        send(client, worker, message)
+        client.close()
+    return
+
+
+def stop_or_retire(workers, action, worker=None, group=None):
+    actual_workers = get_workers(workers, worker, group)
+    if action == 'stop':
+        message = {'action': 'stop'}
+    else:
+        message = {'action': 'retire'}
+    broadcast(actual_workers, message)
+
+
+def load_json(config_file):
     with open(config_file, 'r') as fp:
         data = json.load(fp)
     return data
@@ -292,16 +265,17 @@ if __name__ == '__main__':
         print("Sub-command required!", file=sys.stderr)
         arg_parser.print_help()
 
-    print(args)
-    union_config = load_config(args.union)
-    listing_config = load_config(args.listings)
+    union_data = load_json(args.union)
 
-    # hmmm it's stateless anyway why do I need an object..
-    dispatcher = Dispatcher(union_config, job=args.job,
-                            tag=args.tag, worker=args.worker)
-
-    # dispatcher = Dispatcher(config, job=args.job, tag=args.tag,
-    #                         worker=args.worker, group=args.group)
-    # dispatcher.run(action)
-    # dispatcher.close()
-    # exit(0)
+    if args.sub_cmd == 'run':
+        listing_data = load_json(args.listings)
+        run(union_data['workers'], listing_data, args.job, args.tag,
+            args.worker, args.group)
+    elif args.sub_cmd == 'report':
+        report(union_data['workers'])
+    elif args.sub_cmd == 'stop' or args.sub_cmd == 'retire':
+        stop_or_retire(union_data['workers'], args.sub_cmd,
+                       worker=args.worker, group=args.group)
+    else:
+        print("Unsupported action!")
+        exit(1)
