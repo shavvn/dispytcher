@@ -156,6 +156,8 @@ class Worker(object):
 
             action = data.get('action')
             if action == 'stop':
+                # TODO cannot stop a docker container
+                # need to save container name and use docker utility to stop
                 self.stop()
             elif action == 'dry':
                 self.dry_run(data)

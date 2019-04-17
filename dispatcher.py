@@ -105,24 +105,22 @@ def get_jobs(jobs, job, tag):
     return actual_jobs
 
 
-def run(workers, jobs, job=None, tag=None, worker=None, group=None):
-    actual_workers = get_workers(workers, worker, group)
-    actual_jobs = get_jobs(jobs, job, tag)
-    total_slots = sum([w['num_slots'] for w in actual_workers])
-    if total_slots < len(actual_jobs):
+def run(workers, jobs):
+    total_slots = sum([w['num_slots'] for w in workers])
+    if total_slots < len(jobs):
         print('Warning! More jobs than workers can handle!',
               'Jobs that cannot be sent will be dumped as remaining_jobs.json')
-        remaining_jobs = actual_jobs[total_slots:]
+        remaining_jobs = jobs[total_slots:]
     else:
         remaining_jobs = []
 
     # we do round robin assignment of jobs to workers
     assignment = {}
     i, j = 0, 0
-    while i < min(len(actual_jobs), total_slots):
-        if j == len(actual_workers):
+    while i < min(len(jobs), total_slots):
+        if j == len(workers):
             j = 0
-        worker = actual_workers[j]
+        worker = workers[j]
         if worker['num_slots'] > 0:
             assignment[i] = j
             worker['num_slots'] -= 1
@@ -132,13 +130,13 @@ def run(workers, jobs, job=None, tag=None, worker=None, group=None):
             j += 1
 
     for i, j in assignment.items():
-        print("Assigning {} to {}".format(actual_jobs[i]['name'],
-                                          actual_workers[j]['name']))
+        print("Assigning {} to {}".format(jobs[i]['name'],
+                                          workers[j]['name']))
 
     client = Client()
     for i, j in assignment.items():
-        job = actual_jobs[i]
-        worker = actual_workers[j]
+        job = jobs[i]
+        worker = workers[j]
         job['action'] = 'run'
         if not send(client, worker, job):
             remaining_jobs.append(job)
@@ -193,13 +191,12 @@ def broadcast(workers, message):
     return
 
 
-def stop_or_retire(workers, action, worker=None, group=None):
-    actual_workers = get_workers(workers, worker, group)
+def stop_or_retire(workers, action):
     if action == 'stop':
         message = {'action': 'stop'}
     else:
         message = {'action': 'retire'}
-    broadcast(actual_workers, message)
+    broadcast(workers, message)
 
 
 def load_json(config_file):
@@ -266,16 +263,17 @@ if __name__ == '__main__':
         arg_parser.print_help()
 
     union_data = load_json(args.union)
+    workers = get_workers(union_data['workers'], args.worker, args.group)
 
     if args.sub_cmd == 'run':
         listing_data = load_json(args.listings)
-        run(union_data['workers'], listing_data, args.job, args.tag,
-            args.worker, args.group)
+        jobs = get_jobs(listing_data, args.job, args.tag)
+        run(workers, jobs)
     elif args.sub_cmd == 'report':
-        report(union_data['workers'])
+        report(workers)
     elif args.sub_cmd == 'stop' or args.sub_cmd == 'retire':
-        stop_or_retire(union_data['workers'], args.sub_cmd,
-                       worker=args.worker, group=args.group)
+        stop_or_retire(workers, args.sub_cmd)
     else:
         print("Unsupported action!")
         exit(1)
+
