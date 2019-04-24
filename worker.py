@@ -84,6 +84,10 @@ class Job(object):
         self._proc = None
 
     def run(self, cmd):
+        """
+        TODO you can use docker -H to get around this kind of hack
+        how the hell did I not look that up first
+        """
         self._proc = subprocess.Popen(
             cmd, cwd=self.cwd,
             stdout=self.stdout, stderr=self.stderr)

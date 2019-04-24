@@ -23,16 +23,28 @@ from collections import OrderedDict
 from jsonsocket import Client
 
 
-def send(client, worker, data):
+def send_one_way(client, worker, data):
+    """Send data to worker and close client afterwards
+
+    Arguments:
+        client {socket.Client} -- client socket
+        worker {dict} -- provide host and port info
+        data {dict} -- data to be sent in json compatible format
+
+    Returns:
+        bool -- True if send successfully, False otherwise
+    """
     try:
         client.connect(worker['hostname'], worker['port'])
         # insert key into every message
         data['key'] = worker.get('key')
         client.send(data)
     except OSError as err:
-        print("Cannot send to worker {}".format(worker['name']))
+        print("Cannot send_one_way to worker {}".format(worker['name']))
         print(err)
         return False
+    finally:
+        client.close()
     return True
 
 
@@ -42,6 +54,50 @@ def recv(client):
     for key, val in sorted(data.items()):
         sorted_data[key] = val
     return sorted_data
+
+
+def send_and_recv(client, worker, data, timeout=5):
+    """Send data and expect reply in timeout period
+
+    Arguments:
+        client {socket.Client} -- client socket
+        worker {dict} -- provide host and port info
+        data {dict} -- data to be sent in json compatible format
+
+    Keyword Arguments:
+        timeout {int} -- timeout in seconds (default: {5})
+
+    Returns:
+        dict -- send&recv status and data if received
+    """
+    send_status = False
+    recv_status = False
+    recv_data = None
+    try:
+        # client.settimeout(timeout)
+        client.connect(worker['hostname'], worker['port'])
+        # insert key into every message
+        data['key'] = worker.get('key')
+        client.send(data)
+    except OSError as err:
+        print("Cannot send_one_way to worker {}".format(worker['name']))
+        print(err)
+    else:
+        send_status = True
+        try:
+            recv_data = client.recv()
+        except OSError as err:
+            print("Cannot recv from worker {}".format(worker['name']))
+        else:
+            recv_status = True
+    finally:
+        client.close()
+        return {
+            'name': worker['name'],
+            'send': send_status,
+            'recv': recv_status,
+            'recv_data': recv_data
+        }
 
 
 def get_workers(workers, worker, group):
@@ -105,7 +161,7 @@ def get_jobs(jobs, job, tag):
     return actual_jobs
 
 
-def run(workers, jobs):
+def run(workers, jobs, debug=False):
     total_slots = sum([w['num_slots'] for w in workers])
     if total_slots < len(jobs):
         print('Warning! More jobs than workers can handle!',
@@ -133,16 +189,20 @@ def run(workers, jobs):
         print("Assigning {} to {}".format(jobs[i]['name'],
                                           workers[j]['name']))
 
+    for job in jobs:
+        job['action'] = 'run'
+
     client = Client()
     for i, j in assignment.items():
         job = jobs[i]
         worker = workers[j]
-        job['action'] = 'run'
-        if not send(client, worker, job):
-            remaining_jobs.append(job)
+        if not debug:
+            if not send_one_way(client, worker, job):
+                remaining_jobs.append(job)
+            else:
+                print('Sent job {} to {}'.format(job['name'], worker['name']))
         else:
-            print('Sent job {} to {}'.format(job['name'], worker['name']))
-        client.close()
+            print('Sending job {} to {}'.format(job['name'], worker['name']))
         time.sleep(0.1)
 
     if len(remaining_jobs) > 0:
@@ -154,25 +214,28 @@ def run(workers, jobs):
 def report(workers):
     client = Client()
     for worker in workers:
-        if not send(client, worker, {'action': 'report'}):
-            print("Cannot ask report for {}".format(worker['name']))
-            continue
-        while True:
-            try:
-                data = recv(client)
-            except (ValueError, OSError) as e:
-                print("No response from {}".format(worker['name']))
-                print(e)
-                break
-            except Exception as e:
-                print('Unexpected error!')
-                print(e)
-                break
-            print('Worker "{}":'.format(worker['name']))
-            for key, val in data.items():
-                print('    {}: {}'.format(key, val))
-            client.close()
-            break
+        data = send_and_recv(client, worker, {'action': 'report'})
+        print(data)
+        # if data['recv_data'] is not None:
+        #     print(data['recv_data'])
+        # if not send_one_way(client, worker, {'action': 'report'}):
+        #     print("Cannot ask report for {}".format(worker['name']))
+        #     continue
+        # while True:
+        #     try:
+        #         data = recv(client)
+        #     except (ValueError, OSError) as e:
+        #         print("No response from {}".format(worker['name']))
+        #         print(e)
+        #         break
+        #     except Exception as e:
+        #         print('Unexpected error!')
+        #         print(e)
+        #         break
+        #     print('Worker "{}":'.format(worker['name']))
+        #     for key, val in data.items():
+        #         print('    {}: {}'.format(key, val))
+        #     break
 
 
 def broadcast(workers, message):
@@ -186,8 +249,7 @@ def broadcast(workers, message):
     client = Client()
     for worker in workers:
         print("Broadcasting to {}".format(worker['name']))
-        send(client, worker, message)
-        client.close()
+        send_one_way(client, worker, message)
     return
 
 
@@ -209,7 +271,7 @@ def add_worker_options(parser):
     parser.add_argument('-u', '--union', type=str,
                         help='json file that has list of all available workers'
                         '. Default value supplied to save typing',
-                        default='workers.json')
+                        default='.last_workers.json')
     parser.add_argument('-w', '--worker', type=str,
                         help='specific worker name')
     parser.add_argument('-g', '--group', type=str,
@@ -276,4 +338,3 @@ if __name__ == '__main__':
     else:
         print("Unsupported action!")
         exit(1)
-
