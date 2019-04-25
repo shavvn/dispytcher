@@ -11,6 +11,7 @@ So yeah, a worker is actually a server from jsonsocket...
 # standard library imports
 import argparse
 import json
+import logging
 import os
 import random
 import signal
@@ -53,6 +54,8 @@ class Job(object):
         self.cmds = job_data.get('cmds')
         if not self.cmds or (not isinstance(self.cmds, list)):
             raise ValueError("Job cmds format not correct!")
+
+        self.slots = job_data.get('num_slots')
 
         self.cwd = job_data.get('cwd', '.')
         if not os.path.exists(self.cwd):
@@ -103,22 +106,16 @@ class Job(object):
     def terminate(self):
         return self._proc.terminate()
 
-    def flush(self):
-        """Flush stdout & stderr buffers"""
-        if self.stdout:
-            self.stdout.flush()
-        if self.stderr:
-            self.stderr.flush()
-
 
 class Worker(object):
 
-    def __init__(self, host_name, port, key):
+    def __init__(self, host_name, port, key, num_slots):
         """Initialize a server process
 
         Arguments:
-            host_name {string} -- [host ip]
-            port {int} -- [socket port]
+            host_name {string} -- host ip
+            port {int} -- socket port
+            num_slots {int} -- total number of slots for this worker
 
         Raises:
             OSError -- happens when resolving host or creating socket
@@ -127,7 +124,12 @@ class Worker(object):
         self.server = Server(host_ip, port)
         self._key = key
 
+        self._total_slots = num_slots
+        self._avail_slots = num_slots
+        self._job_queue = []
+
         # unique id for each job received
+        # TODO should just use job name
         self._job_id = 0
 
         # because it's highly likely to receive multiple jobs at once
@@ -163,18 +165,14 @@ class Worker(object):
                 # TODO cannot stop a docker container
                 # need to save container name and use docker utility to stop
                 self.stop()
-            elif action == 'dry':
-                self.dry_run(data)
             elif action == 'run':
-                stop_event = threading.Event()
-                thread = threading.Thread(
-                    target=self.execute,
-                    args=(data, self._job_id, stop_event,)
-                )
-                self._thread_stops[self._job_id] = stop_event
-                self._threads[self._job_id] = thread
-                self._job_id += 1
-                thread.start()
+                slots_needed = data['num_slots']
+                if slots_needed > self._avail_slots:
+                    print("not enought slots, job queued")
+                    self._job_queue.append(data)
+                else:
+                    self._avail_slots -= slots_needed
+                    self.run(data)
             elif action == 'report':
                 self.report()
             elif action == 'retire':
@@ -183,11 +181,28 @@ class Worker(object):
                 print(data)
             else:
                 continue
+
         return True
 
-    def dry_run(self, data):
-        print("Job:", data['name'])
-        print(data['cmds'])
+    def run(self, data):
+        """Create a thread to run a job
+
+        We need a thread because we don't want to block following jobs
+        execute() is the thread target function
+
+        Arguments:
+            data {dict} -- job info
+        """
+        print('start running {}'.format(data['name']))
+        stop_event = threading.Event()
+        thread = threading.Thread(
+            target=self.execute,
+            args=(data, self._job_id, stop_event,)
+        )
+        self._thread_stops[self._job_id] = stop_event
+        self._threads[self._job_id] = thread
+        self._job_id += 1
+        thread.start()
         return
 
     def execute(self, data, job_id, stop_event):
@@ -208,16 +223,27 @@ class Worker(object):
             if stop_event.is_set():
                 return
         # normal finishing procedures
+        self._avail_slots += job.slots
         self._running_jobs.pop(job_id)
         self._thread_stops.pop(job_id)
         self._threads.pop(job_id)
+        print('Job {} done'.format(job.name))
+
+        # check if there's queued job, strictly FIFO?
+        if len(self._job_queue) > 0:
+            print("has queued job")
+            if self._job_queue[0]['num_slots'] <= self._avail_slots:
+                self.run(self._job_queue.pop(0))
 
     def stop(self):
-        """Stop all jobs that are running
+        """Stop all jobs that are running and clear the ones are queued
 
         Eventually we want something that can stop one specific job
         but for now we just shut down everything that's running on this worker
         """
+        # clean job queue
+        self._job_queue.clear()
+
         # set stop flags for each activa thread so that following commands
         # will not be executed
         for event in self._thread_stops.values():
@@ -230,46 +256,23 @@ class Worker(object):
         for thread in self._threads.values():
             thread.join()
         print("all threads & processes terminated!")
+        self._avail_slots = self._total_slots
         self._running_jobs.clear()
         self._thread_stops.clear()
         self._threads.clear()
 
     def show_output(self, job_data):
-        """Show stdout and stderr of a job
-
-        The stdout and stderr will be flushed, and the contents will be
-        sent to dispatcher as text/str over socket
-        Only send the last 20 lines of output
+        """TODO use docker logs maybe
 
         Arguments:
-            job_name {dict} -- job data
+            job_data {[type]} -- [description]
         """
-        job = None
-        send_lines = None
-        for j in self._running_jobs.values():
-            if j.name == job_name:
-                job = j
-        if job:
-            job.flush()
-            with open(job.stdout.name, 'r') as fp:
-                lines = fp.readlines()
-                if len(lines) > 20:
-                    send_lines = lines[-20:]
-                else:
-                    send_lines = lines
-        else:
-            with open(job_data['stdout'], 'r') as fp:
-                lines = fp.readlines()
-                if len(lines) > 20:
-                    send_lines = lines[-20:]
-                else:
-                    send_lines = lines
-        if send_lines:
-            self.server.send(send_lines)
+        return
 
     def report(self):
         running_jobs = [j.name for j in self._running_jobs.values()]
         stat = {"running_jobs": running_jobs}
+        stat['queued_jobs'] = [j['name'] for j in self._job_queue]
 
         if psutil:
             mem = psutil.virtual_memory()
@@ -327,39 +330,40 @@ def random_key_gen(n=8):
 
 if __name__ == '__main__':
     arg_parser = argparse.ArgumentParser(description='Initialize worker')
-    arg_parser.add_argument('-c', '--config', type=str,
+    arg_parser.add_argument('config', type=str, default=None,
                             help='config json file contains host info.\n'
-                            'Must have following fields: hostname, port')
+                            'Specify: hostname, port, num_slots, [key]')
     arg_parser.add_argument('-H', '--hostname', type=str,
                             help='external accessible hostname of this worker')
     arg_parser.add_argument('-p', '--port', type=int, default=6666,
                             help='socket port number')
-    arg_parser.add_argument('-k', '--key', type=str,
+    arg_parser.add_argument('-s', '--slots', default=8,
+                            help='total slots for this worker')
+    arg_parser.add_argument('-k', '--key', type=str, default=None,
                             help='only work with dispatcher with matching key')
 
     args = arg_parser.parse_args()
 
     hostname = None
     port = None
+    slots = 0
     key = None
-    if args.hostname and not args.config:
+    if args.config is None:
         hostname = args.hostname
-        print("")
         if args.port <= 1024:  # kernel port
             print("try a port # larger than 1024!")
             exit(1)
         port = args.port
-    elif args.config and not args.hostname:
+        slots = args.slots
+        key = args.key
+    else:
         with open(args.config, 'r') as fp:
             config = json.load(fp)
             hostname = config['hostname']
             port = config['port']
+            slots = config['num_slots']
             if config.get('key'):  # may want key be secret
                 key = config['key']
-        pass
-    else:
-        print("please specify either hostname or config file")
-        exit(1)
 
     if not key:
         if not args.key:
@@ -369,5 +373,5 @@ if __name__ == '__main__':
             exit(1)
         else:
             key = args.key
-    worker = Worker(hostname, port, key)
+    worker = Worker(hostname, port, key, slots)
     worker.start()

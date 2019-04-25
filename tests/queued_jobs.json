@@ -1,0 +1,19 @@
+[
+    {
+        "name": "sleep1",
+        "cmds": [
+            ["sleep", "5"],
+            ["echo", "wake"]
+        ],
+        "num_slots": 4,
+        "action": "run"
+    },
+    {
+        "name": "echo1",
+        "cmds": [
+            ["echo", "after waiting"]
+        ],
+        "num_slots": 4,
+        "action": "run"
+    }
+]

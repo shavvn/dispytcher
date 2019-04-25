@@ -23,7 +23,7 @@ from collections import OrderedDict
 from jsonsocket import Client
 
 
-def send_one_way(client, worker, data):
+def send_noblock(client, worker, data):
     """Send data to worker and close client afterwards
 
     Arguments:
@@ -40,7 +40,7 @@ def send_one_way(client, worker, data):
         data['key'] = worker.get('key')
         client.send(data)
     except OSError as err:
-        print("Cannot send_one_way to worker {}".format(worker['name']))
+        print("Cannot send to worker {}".format(worker['name']))
         print(err)
         return False
     finally:
@@ -80,7 +80,7 @@ def send_and_recv(client, worker, data, timeout=5):
         data['key'] = worker.get('key')
         client.send(data)
     except OSError as err:
-        print("Cannot send_one_way to worker {}".format(worker['name']))
+        print("Cannot send to worker {}".format(worker['name']))
         print(err)
     else:
         send_status = True
@@ -197,7 +197,7 @@ def run(workers, jobs, debug=False):
         job = jobs[i]
         worker = workers[j]
         if not debug:
-            if not send_one_way(client, worker, job):
+            if not send_noblock(client, worker, job):
                 remaining_jobs.append(job)
             else:
                 print('Sent job {} to {}'.format(job['name'], worker['name']))
@@ -216,26 +216,6 @@ def report(workers):
     for worker in workers:
         data = send_and_recv(client, worker, {'action': 'report'})
         print(data)
-        # if data['recv_data'] is not None:
-        #     print(data['recv_data'])
-        # if not send_one_way(client, worker, {'action': 'report'}):
-        #     print("Cannot ask report for {}".format(worker['name']))
-        #     continue
-        # while True:
-        #     try:
-        #         data = recv(client)
-        #     except (ValueError, OSError) as e:
-        #         print("No response from {}".format(worker['name']))
-        #         print(e)
-        #         break
-        #     except Exception as e:
-        #         print('Unexpected error!')
-        #         print(e)
-        #         break
-        #     print('Worker "{}":'.format(worker['name']))
-        #     for key, val in data.items():
-        #         print('    {}: {}'.format(key, val))
-        #     break
 
 
 def broadcast(workers, message):
@@ -249,7 +229,7 @@ def broadcast(workers, message):
     client = Client()
     for worker in workers:
         print("Broadcasting to {}".format(worker['name']))
-        send_one_way(client, worker, message)
+        send_noblock(client, worker, message)
     return
 
 

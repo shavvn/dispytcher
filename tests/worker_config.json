@@ -1,5 +1,6 @@
 {
 	"hostname": "localhost",
 	"port": 6666,
-	"key": "ffffffff"
+	"key": "deadbeef",
+	"num_slots": 4
 }
