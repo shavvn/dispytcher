@@ -33,7 +33,7 @@ from jsonsocket import Server
 
 class Job(object):
 
-    def __init__(self, job_data, job_id):
+    def __init__(self, job_data):
         """A Job class for ease management
 
         A job can have multiple commands, but only ONE cwd, stdout, stderr.
@@ -45,11 +45,10 @@ class Job(object):
         Raised:
             ValueError -- if job name or cmds does not make sense
         """
-        # it should be noted that name may not be unique
+        # it should be noted that name must be unique (during its life cycle)
         self.name = job_data.get('name')
         if not self.name:
             raise ValueError("Job name not received!")
-        self.id = job_id
 
         self.cmds = job_data.get('cmds')
         if not self.cmds or (not isinstance(self.cmds, list)):
@@ -62,26 +61,8 @@ class Job(object):
             try:
                 os.mkdir(self.cwd)
             except:
-                print("Invalid CWD! {}".format(self.cwd))
+                logging.warn("Invalid CWD! {}".format(self.cwd))
                 self.cwd = '.'
-
-        self.stdout = None
-        stdout_name = job_data.get('stdout')
-        if stdout_name:
-            try:
-                self.stdout = open(stdout_name, 'w')
-            except Exception as e:
-                print("cannot use {} for stdout".format(stdout_name))
-                print(e)
-
-        self.stderr = self.stdout
-        stderr_name = job_data.get('stderr')
-        if stderr_name and stderr_name != stdout_name:
-            try:
-                self.stderr = open(stderr_name, 'w')
-            except Exception as e:
-                print("cannot use {} for stderr".format(stdout_name))
-                print(e)
 
         # actual Popen object
         self._proc = None
@@ -89,11 +70,9 @@ class Job(object):
     def run(self, cmd):
         """
         TODO you can use docker -H to get around this kind of hack
-        how the hell did I not look that up first
+        Or... you can use docker-py PDK
         """
-        self._proc = subprocess.Popen(
-            cmd, cwd=self.cwd,
-            stdout=self.stdout, stderr=self.stderr)
+        self._proc = subprocess.Popen(cmd, cwd=self.cwd)
         return self
 
     def wait(self):
@@ -151,28 +130,29 @@ class Worker(object):
             try:
                 data = self._recv()
             except (ValueError, OSError) as e:
-                print('Cannot recv data! Closing socket...')
-                print(e.message)
+                logging.error('Cannot recv data! Closing socket...')
+                logging.error(e.message)
                 # forcing client to close to free up resource
                 continue
             except Exception as e:
-                print('Unexpected error!')
-                print(e.message)
+                logging.error('Unexpected error!')
+                logging.error(e.message)
                 continue
 
             action = data.get('action')
             if action == 'stop':
                 # TODO cannot stop a docker container
                 # need to save container name and use docker utility to stop
+                logging.info('stop all jobs')
                 self.stop()
             elif action == 'run':
-                slots_needed = data['num_slots']
-                if slots_needed > self._avail_slots:
-                    print("not enought slots, job queued")
-                    self._job_queue.append(data)
+                job = Job(data)
+                logging.info('receving job {}'.format(job.name))
+                if job.slots > self._avail_slots:
+                    logging.info('no enough slots, {} queued'.format(job.name))
+                    self._job_queue.append(job)
                 else:
-                    self._avail_slots -= slots_needed
-                    self.run(data)
+                    self.run(job)
             elif action == 'report':
                 self.report()
             elif action == 'retire':
@@ -184,38 +164,38 @@ class Worker(object):
 
         return True
 
-    def run(self, data):
+    def run(self, job):
         """Create a thread to run a job
 
         We need a thread because we don't want to block following jobs
         execute() is the thread target function
 
         Arguments:
-            data {dict} -- job info
+            job {Job} -- Job object
         """
-        print('start running {}'.format(data['name']))
+        self._avail_slots -= job.slots
+        logging.info(
+            'start running {}, avail slots {}/{}'.format(
+                job.name, self._avail_slots, self._total_slots))
         stop_event = threading.Event()
         thread = threading.Thread(
             target=self.execute,
-            args=(data, self._job_id, stop_event,)
+            args=(job, stop_event,)
         )
-        self._thread_stops[self._job_id] = stop_event
-        self._threads[self._job_id] = thread
-        self._job_id += 1
+        self._thread_stops[job.name] = stop_event
+        self._threads[job.name] = thread
         thread.start()
         return
 
-    def execute(self, data, job_id, stop_event):
+    def execute(self, job, stop_event):
         """Given the job data run the command
 
         Note this is completely running within one thread
         Arguments:
-            data {dict} -- job data
-            job_id {int} -- job id that each worker keeps track of
+            job {Job} -- job object
             stop_event {threading.Event} -- an event/flag attached to each job
         """
-        job = Job(data, job_id)
-        self._running_jobs[job_id] = job
+        self._running_jobs[job.name] = job
         for cmd in job.cmds:
             job.run(cmd)
             job.wait()
@@ -224,15 +204,15 @@ class Worker(object):
                 return
         # normal finishing procedures
         self._avail_slots += job.slots
-        self._running_jobs.pop(job_id)
-        self._thread_stops.pop(job_id)
-        self._threads.pop(job_id)
-        print('Job {} done'.format(job.name))
+        self._running_jobs.pop(job.name)
+        self._thread_stops.pop(job.name)
+        self._threads.pop(job.name)
+        logging.info('job {} done'.format(job.name))
 
         # check if there's queued job, strictly FIFO?
         if len(self._job_queue) > 0:
-            print("has queued job")
-            if self._job_queue[0]['num_slots'] <= self._avail_slots:
+            if self._job_queue[0].slots <= self._avail_slots:
+                logging.info('pop queued job from queue')
                 self.run(self._job_queue.pop(0))
 
     def stop(self):
@@ -255,7 +235,7 @@ class Worker(object):
         # this shouldn't do anything
         for thread in self._threads.values():
             thread.join()
-        print("all threads & processes terminated!")
+        logging.info("all threads & processes stopped!")
         self._avail_slots = self._total_slots
         self._running_jobs.clear()
         self._thread_stops.clear()
@@ -286,9 +266,9 @@ class Worker(object):
             self.server.send(stat)
             self.server.settimeout(None)
         except (ValueError, OSError) as e:
-            print("cannot send report, continue operation")
-            print(e.message)
-        print("stats sent out")
+            logging.warn("cannot send report, continue operation")
+            logging.warn(e.message)
+        logging.info("stats sent out")
         return
 
     def _recv(self):
@@ -300,13 +280,13 @@ class Worker(object):
         data = self.server.recv()
         key = data.get('key')
         if key != self._key:
-            print("key does not match!, ignore message")
+            logging.warn("key does not match!, ignore message")
             return {}
         else:
             return data
 
     def _gracefully_exit(self, signum, frame):
-        print("Gracefully shutting down...")
+        logging.warn("Gracefully shutting down...")
         self.stop()
         self.server.close()
         exit(0)
@@ -328,6 +308,15 @@ def random_key_gen(n=8):
     return ''.join(random.choice(chars) for _ in range(n))
 
 
+def init_logging():
+    logging.basicConfig(
+        filename='{}/worker.log'.format(os.environ['HOME']),
+        format='%(levelname)s|%(asctime)s: %(message)s',
+        level=logging.DEBUG
+    )
+    return
+
+
 if __name__ == '__main__':
     arg_parser = argparse.ArgumentParser(description='Initialize worker')
     arg_parser.add_argument('config', type=str, default=None,
@@ -343,6 +332,7 @@ if __name__ == '__main__':
                             help='only work with dispatcher with matching key')
 
     args = arg_parser.parse_args()
+    init_logging()
 
     hostname = None
     port = None
@@ -351,7 +341,7 @@ if __name__ == '__main__':
     if args.config is None:
         hostname = args.hostname
         if args.port <= 1024:  # kernel port
-            print("try a port # larger than 1024!")
+            logging.error("try a port # larger than 1024!")
             exit(1)
         port = args.port
         slots = args.slots
@@ -369,7 +359,7 @@ if __name__ == '__main__':
         if not args.key:
             key = random_key_gen(12)
         elif len(args.key) < 8:
-            print("key must have 8+ chars")
+            logging.error("key must have 8+ chars")
             exit(1)
         else:
             key = args.key
