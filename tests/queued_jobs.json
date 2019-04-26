@@ -1,12 +1,11 @@
 [
     {
         "name": "sleep1",
-        "cmds": [
-            ["sleep", "5"],
-            ["echo", "wake"]
+        "command": [
+            "sleep", "5"
         ],
         "num_slots": 4,
-        "action": "run"
+        "image": "ubuntu:18.04"
     },
     {
         "name": "echo1",
@@ -14,6 +13,6 @@
             ["echo", "after waiting"]
         ],
         "num_slots": 4,
-        "action": "run"
+        "image": "ubuntu:18.04"
     }
 ]

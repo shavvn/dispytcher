@@ -74,7 +74,6 @@ def send_and_recv(client, worker, data, timeout=5):
     recv_status = False
     recv_data = None
     try:
-        # client.settimeout(timeout)
         client.connect(worker['hostname'], worker['port'])
         # insert key into every message
         data['key'] = worker.get('key')
@@ -85,6 +84,8 @@ def send_and_recv(client, worker, data, timeout=5):
     else:
         send_status = True
         try:
+            # TODO this timeout doesn't do shit
+            # client.settimeout(timeout)
             recv_data = client.recv()
         except OSError as err:
             print("Cannot recv from worker {}".format(worker['name']))
@@ -193,6 +194,7 @@ def run(workers, jobs, debug=False):
         job['action'] = 'run'
 
     client = Client()
+    sent_jobs = set()
     for i, j in assignment.items():
         job = jobs[i]
         worker = workers[j]
@@ -200,14 +202,22 @@ def run(workers, jobs, debug=False):
             if not send_noblock(client, worker, job):
                 remaining_jobs.append(job)
             else:
+                sent_jobs.add(job['name'])
                 print('Sent job {} to {}'.format(job['name'], worker['name']))
         else:
             print('Sending job {} to {}'.format(job['name'], worker['name']))
         time.sleep(0.1)
 
     if len(remaining_jobs) > 0:
+        if os.path.exists('remaining_jobs.json'):
+            with open('remaining_jobs.json', 'r') as fp:
+                prev_jobs = json.load(fp)
+                for job in prev_jobs:
+                    if job['name'] not in sent_jobs:
+                        remaining_jobs.append(job)
+
         with open('remaining_jobs.json', 'w') as fp:
-            json.dump(remaining_jobs, fp)
+            json.dump(remaining_jobs, fp, indent=4)
     return
 
 

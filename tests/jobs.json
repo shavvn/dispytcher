@@ -1,12 +1,14 @@
 [
     {
         "name": "test_one",
-        "stdout": "",
-        "stderr": "",
-        "cmds": [
-            ["ls"],
-            ["echo", "hello world!"]
+        "image": "ubuntu:18.04",
+        "command": [
+            "/bin/echo",
+            "hello world"
         ],
+        "mounts": [],
+        "logfile": null,
+        "kwargs": {},
         "num_slots": 1,
         "tags": [
             "testing"
@@ -14,23 +16,10 @@
     },
     {
         "name": "test_long",
-        "stdout": "",
-        "stderr": "",
-        "cmds": [
-            ["sleep", "5"],
-            ["echo", "wake up"]
-        ],
-        "num_slots": 1,
-        "tags": [
-            "testing"
-        ]
-    },
-    {
-        "name": "test_out",
-        "stdout": "tests/stdout.txt",
-        "stderr": "",
-        "cmds": [
-            ["echo", "hello world to a file!"]
+        "image": "ubuntu:18.04",
+        "command": [
+            "sleep",
+            "5"
         ],
         "num_slots": 1,
         "tags": [
