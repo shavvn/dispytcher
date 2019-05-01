@@ -243,14 +243,6 @@ def broadcast(workers, message):
     return
 
 
-def stop_or_retire(workers, action):
-    if action == 'stop':
-        message = {'action': 'stop'}
-    else:
-        message = {'action': 'retire'}
-    broadcast(workers, message)
-
-
 def load_json(config_file):
     with open(config_file, 'r') as fp:
         data = json.load(fp)
@@ -292,9 +284,12 @@ def init_argparser():
         'retire', help='retire worker for good')
     report_cmd = subparsers.add_parser(
         'report', help='report worker status (jobs, CPU, mem)')
+    restart_cmd = subparsers.add_parser(
+        'restart', help='restart worker'
+    )
     add_job_options(run_cmd)
     add_job_options(stop_cmd)
-    for cmd in [run_cmd, stop_cmd, report_cmd, retire_cmd]:
+    for cmd in [run_cmd, stop_cmd, report_cmd, retire_cmd, restart_cmd]:
         add_worker_options(cmd)
 
     return parser
@@ -323,8 +318,8 @@ if __name__ == '__main__':
         run(workers, jobs)
     elif args.sub_cmd == 'report':
         report(workers)
-    elif args.sub_cmd == 'stop' or args.sub_cmd == 'retire':
-        stop_or_retire(workers, args.sub_cmd)
+    elif args.sub_cmd in set(['stop', 'retire', 'restart']):
+        broadcast(workers, {'action': args.sub_cmd})
     else:
         print("Unsupported action!")
         exit(1)

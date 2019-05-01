@@ -17,7 +17,9 @@ import random
 import signal
 import socket
 import string
+import subprocess
 import threading
+import time
 
 import docker
 
@@ -145,6 +147,9 @@ class Worker(object):
         signal.signal(signal.SIGINT, self._gracefully_exit)
         signal.signal(signal.SIGTERM, self._gracefully_exit)
 
+        # image maintaince, image&tag as key, last updated time as value
+        self._last_checked = {}
+
     def start(self):
         while True:
             self.server.accept()  # blocking
@@ -181,6 +186,8 @@ class Worker(object):
                 self.report()
             elif action == 'retire':
                 self._gracefully_exit(None, None)
+            elif action == 'restart':
+                self.restart()
             elif action == 'debug':
                 logging.debug(data)
             else:
@@ -197,6 +204,9 @@ class Worker(object):
         Arguments:
             job {Job} -- Job object
         """
+        # check if image up to date before running...
+        self.check_update_image(job.image)
+
         self._avail_slots -= job.slots
         logging.info(
             'start running {}, avail slots {}/{}'.format(
@@ -245,6 +255,37 @@ class Worker(object):
                 logging.info('pop queued job {} from queue')
                 self.run(self._job_queue.pop(0))
 
+    def check_update_image(self, repo, interval=60):
+        """Check if image is up to date, pull the latest from registry
+
+        By default we pull an image from registry if it hasn't been updated
+        for a minute. The registry seems to return a different SHA for the
+        same image from locally, so not sure if I can check an image is
+        uptodate quickly. Just brute force it...
+
+        Arguments:
+            repo {str} -- repository, should include registry and tag!
+
+        Keyword Arguments:
+            interval {int} -- update intreval in seconds (default: {60})
+        """
+
+        curr_time = int(time.time())
+        last_time = self._last_checked.get(repo, 0)
+        if curr_time - last_time > interval:
+            try:
+                self.docker.images.pull(repo)
+            except:
+                logging.error('failed to pull image {} from registry!'
+                              'Using old image if available!'.format(repo))
+            else:
+                logging.info('image {} pulled at {}'.format(
+                    repo, curr_time))
+                self._last_checked[repo] = curr_time
+        else:
+            logging.info('image {} updated within {}s, not pulling'.format(
+                repo, interval))
+
     def stop(self):
         """Stop all jobs that are running and clear the ones are queued
 
@@ -272,6 +313,26 @@ class Worker(object):
         self._running_jobs.clear()
         self._thread_stops.clear()
         self._threads.clear()
+
+    def restart(self):
+        """Restart this process by starting a timed background process
+
+        Does the following:
+        - stop all running jobs on this worker
+        - schedule a new worker process in 30s
+        - retire this worker
+
+        Primarily used for updating worker code, kinda hacky but works
+        """
+        logging.warn('restarting worker process...')
+        self.stop()
+
+        # hard code this
+        config_path = os.path.join(os.environ['HOME'], '.worker.json')
+        cmd = 'sleep 30 && ./worker.py {}'.format(config_path)
+        subprocess.Popen(cmd, shell=True)
+
+        self._gracefully_exit(None, None)
 
     def report(self):
         running_jobs = [j.name for j in self._running_jobs.values()]
@@ -310,7 +371,7 @@ class Worker(object):
             return data
 
     def _gracefully_exit(self, signum, frame):
-        logging.warn("Gracefully shutting down...")
+        logging.warn("gracefully shutting down...")
         self.stop()
         self.server.close()
         exit(0)
