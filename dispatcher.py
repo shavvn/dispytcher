@@ -221,11 +221,47 @@ def run(workers, jobs, debug=False):
     return
 
 
+def _tabulate(rows):
+    """Print tabulated report data
+    """
+    header = '{:<10}{:^7}{:^35}{:^35}{:>8}{:>8}'.format(
+        'name', 'status', 'running', 'queued', 'cpu(%)', 'mem(%)')
+    print(header)
+    for row in rows:
+        running_jobs = row['recv_data']['running_jobs']
+        queued_jobs = row['recv_data']['queued_jobs']
+        first_row = '{:10s}{:7s}{:35}{:35}{:>7.1f}{:>7.1f}'.format(
+            row['name'],
+            'OK' if row['send'] and row['recv'] else 'DOWN',
+            running_jobs[0] if running_jobs else '',
+            queued_jobs[0] if queued_jobs else '',
+            row['recv_data']['cpu_usage(%)'],
+            row['recv_data']['mem_usage(%)']
+        )
+        print(first_row)
+        row_height = max(len(running_jobs), len(queued_jobs))
+        if row_height > 1:
+            for i in range(1, row_height):
+                run_job_str = ''
+                if i < len(running_jobs):
+                    run_job_str = running_jobs[i]
+                queue_job_str = ''
+                if i < len(queued_jobs):
+                    queue_job_str = queued_jobs[i]
+                extra_row = '{:<10}{:^7}{:35}{:35}{:>8}{:>8}'.format(
+                    '', '', run_job_str, queue_job_str, '', ''
+                )
+                print(extra_row)
+        print('')
+
+
 def report(workers):
     client = Client()
+    data = []
     for worker in workers:
-        data = send_and_recv(client, worker, {'action': 'report'})
-        print(data)
+        worker_data = send_and_recv(client, worker, {'action': 'report'})
+        data.append(worker_data)
+    _tabulate(data)
 
 
 def broadcast(workers, message):
