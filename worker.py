@@ -204,6 +204,11 @@ class Worker(object):
         Arguments:
             job {Job} -- Job object
         """
+        # check if there is already a running container with same name
+        if job.name in self._running_jobs:
+            logging.error('name conflict for job {}'.format(job.name))
+            return
+
         # check if image up to date before running...
         self.check_update_image(job.image)
 
